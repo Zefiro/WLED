@@ -51,8 +51,13 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
+	// map USBserial into container for upload
+	"runArgs": [ "--device=/dev/ttyUSB0" ],
+
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"postCreateCommand": "bash -i -c 'nvm install && npm ci'",
+// Zefiro: I needed to manually install intelhex, not sure if still needed - but I don't use dev containers anymore anyway
+//	"postCreateCommand": "npm install && /home/vscode/.platformio/penv/bin/pip install intelhex",
 
 	// Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode"

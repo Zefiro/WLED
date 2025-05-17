@@ -217,6 +217,10 @@
   #include "../usermods/TetrisAI_v2/usermod_v2_tetrisai.h"
 #endif
 
+#ifdef USERMOD_DRAGON_DANCER
+  #include "../usermods/dragon_dancer/dancer.h"
+#endif
+
 void registerUsermods()
 {
 /*
@@ -421,4 +425,9 @@ void registerUsermods()
   #ifdef USERMOD_TETRISAI
   usermods.add(new TetrisAIUsermod());
   #endif
+
+  #ifdef USERMOD_DRAGON_DANCER
+  usermods.add(new DragonDancerFx());
+  #endif
+
 }

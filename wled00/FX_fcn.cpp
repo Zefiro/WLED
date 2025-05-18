@@ -592,6 +592,9 @@ void Segment::setMode(uint8_t fx, bool loadDefaults) {
       sOpt = extractModeDefaults(fx, "rY");  if (sOpt >= 0) reverse_y = (bool)sOpt;
       sOpt = extractModeDefaults(fx, "mY");  if (sOpt >= 0) mirror_y  = (bool)sOpt; // NOTE: setting this option is a risky business
       sOpt = extractModeDefaults(fx, "pal"); if (sOpt >= 0) setPalette(sOpt); //else setPalette(0);
+      sOpt = extractModeDefaults(fx, "col1"); if (sOpt >= 0) setColor(0, sOpt);
+      sOpt = extractModeDefaults(fx, "col2"); if (sOpt >= 0) setColor(1, sOpt);
+      sOpt = extractModeDefaults(fx, "col3"); if (sOpt >= 0) setColor(2, sOpt);
     }
     markForReset();
     stateChanged = true; // send UDP/WS broadcast

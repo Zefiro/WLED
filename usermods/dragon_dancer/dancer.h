@@ -23,6 +23,7 @@ commands:
   pal=set a specific palette (palette and effect IDs are shown in tooltip)
   m12=2D matrix related number, defined in index.js populateSegments map2D
   si= sound sim (shown in segment config)
+  col1/col2/col3=Custom command to set segment colors. Needs the 32bit color value in decimal format.
   
 Commands are set in the Backend, FX_fcn.cpp Segment::setMode() using extractModeDefaults().
 Only those keys which are explicitely listed there can be set.alignas
@@ -83,7 +84,7 @@ JSON as sniffed from the network tab:
 }
 */
 static const char _data_FX_MODE_DANCER[] PROGMEM = "Dancer@Color speed,Circle speed,Circle Strength,,,Mirrored,Flipped;;;;sx=55,ix=125,c1=111,o1=1,o2=1";
-static const char _data_FX_MODE_DANCER_HELPER[] PROGMEM = "(Dancer Helper)@Offset x10,,,,,Current,Saved,Origin;Current,Saved,Origin;;1;sx=0,bri=128,o1=1,o2=1,o3=1";
+static const char _data_FX_MODE_DANCER_HELPER[] PROGMEM = "(Dancer Helper)@Offset x10,,,,,Current,Saved,Origin;Current,Saved,Origin;;1;sx=0,bri=128,o1=1,o2=1,o3=1,col1=16711680,col2=65280,col3=255";
 // static const char _data_FX_MODE_EXAMPLE[] PROGMEM = "Effect Name@Slider 1,Slider 2,Slider 3,Slider 4,Slider 5,Checkbox 1,Checkbox 1,Checkbox 1;col1,c2lor,3col,ccl4?;!;012vf;sx=1,ix=2,c1=3,c2=4,c3=5,o1=1,o2=1,o3=1,pal=50,mi=true,bri=128,m12=2,si=1";
 
 #define MAX_BLEND_ENTRIES 20

@@ -82,8 +82,8 @@ JSON as sniffed from the network tab:
 	}
 }
 */
-static const char _data_FX_MODE_DANCER[] PROGMEM = "Dancer@Color speed,Circle speed,Circle Strength,,,Mirrored,Flipped;;;;sx=55,ix=125,c1=111,o2=1";
-static const char _data_FX_MODE_DANCER_HELPER[] PROGMEM = "(Dancer Helper)@Offset x10,,,,,Current,Saved,Origin;Current,Saved,Origin;!;1;sx=0,o1=false,o2=true,o3=true,bri=128,o1=1,o2=1,o3=1";
+static const char _data_FX_MODE_DANCER[] PROGMEM = "Dancer@Color speed,Circle speed,Circle Strength,,,Mirrored,Flipped;;;;sx=55,ix=125,c1=111,o1=1,o2=1";
+static const char _data_FX_MODE_DANCER_HELPER[] PROGMEM = "(Dancer Helper)@Offset x10,,,,,Current,Saved,Origin;Current,Saved,Origin;;1;sx=0,bri=128,o1=1,o2=1,o3=1";
 // static const char _data_FX_MODE_EXAMPLE[] PROGMEM = "Effect Name@Slider 1,Slider 2,Slider 3,Slider 4,Slider 5,Checkbox 1,Checkbox 1,Checkbox 1;col1,c2lor,3col,ccl4?;!;012vf;sx=1,ix=2,c1=3,c2=4,c3=5,o1=1,o2=1,o3=1,pal=50,mi=true,bri=128,m12=2,si=1";
 
 #define MAX_BLEND_ENTRIES 20
@@ -213,8 +213,8 @@ private:
     // configuration parameters.
     uint8_t speed = SEGMENT.speed == 0 ? 0 : 256-SEGMENT.speed; // was: 55 -> 5 steps per second, needs 40 seconds per color (lower is faster)
     uint16_t px_dimm = 256 - SEGMENT.custom1; // was: 111 -> 0..255, 128 = no dimming, 0 = full dimming
-    bool mirror = !SEGMENT.check1; // off = hard edge but more noticeable effect, on = more subtle but smooth
-    bool toggleCircleDirection = !SEGMENT.check2; // toggle circle movement direction for each ball
+    bool mirror = SEGMENT.check1; // off = hard edge but more noticeable effect, on = more subtle but smooth
+    bool toggleCircleDirection = SEGMENT.check2; // toggle circle movement direction for each ball
     uint_fast16_t curPxDimm = 0;
 
     CRGB c;
@@ -378,17 +378,17 @@ private:
       lastX = SEGMENT.speed;
     }
     for(uint16_t pxIdx = 0; pxIdx < SEGMENT.length(); pxIdx++) {
-      CRGB c = CRGB(0, 0, 0);
+      uint32_t c = BLACK;
       uint16_t idxInBall = pxIdx % DANCER_BALL_LENGTH;
       uint16_t ballIdx = (pxIdx / DANCER_BALL_LENGTH) % DANCER_MAX_BALLS;
       if (idxInBall == 0 && SEGMENT.check3) {
-        c |= SEGMENT.colors[2];
+        c = color_add(c, SEGMENT.colors[2], true);
       }
       if (((idxInBall + DANCER_CIRCLE_OFFSET[ballIdx]) % DANCER_BALL_LENGTH == 0) && SEGMENT.check2) {
-        c |= SEGMENT.colors[1];
+        c = color_add(c, SEGMENT.colors[1], true);
       }      
       if (((idxInBall + offset) % DANCER_BALL_LENGTH == 0) && SEGMENT.check1) {
-        c |= SEGMENT.colors[0];
+        c = color_add(c, SEGMENT.colors[0], true);
       }
       SEGMENT.setPixelColor(pxIdx, c);
     }

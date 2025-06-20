@@ -221,6 +221,10 @@
   #include "../usermods/dragon_dancer/dancer.h"
 #endif
 
+#ifdef USERMOD_DONT_BLINK
+  #include "../usermods/dont_blink/dont_blink.h"
+#endif
+
 void registerUsermods()
 {
 /*
@@ -430,4 +434,7 @@ void registerUsermods()
   usermods.add(new DragonDancerFx());
   #endif
 
+  #ifdef USERMOD_DONT_BLINK
+  usermods.add(new DontBlink());
+  #endif
 }

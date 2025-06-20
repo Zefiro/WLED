@@ -170,12 +170,18 @@ bool oappend(const char* txt)
   return true;
 }
 
+#ifndef WLED_NETWORK_HOSTNAME_PREFIX
+#define WLED_NETWORK_HOSTNAME_PREFIX "wled-"
+#else
+#pragma message ("WLED_NETWORK_HOSTNAME_PREFIX = '" WLED_NETWORK_HOSTNAME_PREFIX "'")
+#endif
+#define WLED_NETWORK_HOSTNAME_PREFIX_LEN (sizeof(WLED_NETWORK_HOSTNAME_PREFIX) - 1)
 
 void prepareHostname(char* hostname)
 {
-  sprintf_P(hostname, PSTR("wled-%*s"), 6, escapedMac.c_str() + 6);
+  sprintf_P(hostname, PSTR(WLED_NETWORK_HOSTNAME_PREFIX "%*s"), 6, escapedMac.c_str() + 6);
   const char *pC = serverDescription;
-  uint8_t pos = 5;          // keep "wled-"
+  uint8_t pos = WLED_NETWORK_HOSTNAME_PREFIX_LEN;          // keep "wled-"
   while (*pC && pos < 24) { // while !null and not over length
     if (isalnum(*pC)) {     // if the current char is alpha-numeric append it to the hostname
       hostname[pos] = *pC;
@@ -188,8 +194,8 @@ void prepareHostname(char* hostname)
     pC++;
   }
   //last character must not be hyphen
-  if (pos > 5) {
-    while (pos > 4 && hostname[pos -1] == '-') pos--;
+  if (pos > WLED_NETWORK_HOSTNAME_PREFIX_LEN) {
+    while (pos >= WLED_NETWORK_HOSTNAME_PREFIX_LEN && hostname[pos -1] == '-') pos--;
     hostname[pos] = '\0'; // terminate string (leave at least "wled")
   }
 }

@@ -592,9 +592,10 @@ void Segment::setMode(uint8_t fx, bool loadDefaults) {
       sOpt = extractModeDefaults(fx, "rY");  if (sOpt >= 0) reverse_y = (bool)sOpt;
       sOpt = extractModeDefaults(fx, "mY");  if (sOpt >= 0) mirror_y  = (bool)sOpt; // NOTE: setting this option is a risky business
       sOpt = extractModeDefaults(fx, "pal"); if (sOpt >= 0) setPalette(sOpt); //else setPalette(0);
-      sOpt = extractModeDefaults(fx, "col1"); if (sOpt >= 0) setColor(0, sOpt);
-      sOpt = extractModeDefaults(fx, "col2"); if (sOpt >= 0) setColor(1, sOpt);
-      sOpt = extractModeDefaults(fx, "col3"); if (sOpt >= 0) setColor(2, sOpt);
+      // Initial default colors. sOpt is only 16 bit, so we do a 5-6-5 conversion. Using hexStringToColor() would be better, but how to extract a string here?
+      sOpt = extractModeDefaults(fx, "col1"); if (sOpt != -1) setColor(0, ((sOpt & 0b1111100000000000) << (16+3-11)) + ((sOpt & 0b0000011111100000) << (8+2-5)) + ((sOpt & 0b0000000000011111) << (0+3)));
+      sOpt = extractModeDefaults(fx, "col2"); if (sOpt != -1) setColor(1, ((sOpt & 0b1111100000000000) << (16+3-11)) + ((sOpt & 0b0000011111100000) << (8+2-5)) + ((sOpt & 0b0000000000011111) << (0+3)));
+      sOpt = extractModeDefaults(fx, "col3"); if (sOpt != -1) setColor(2, ((sOpt & 0b1111100000000000) << (16+3-11)) + ((sOpt & 0b0000011111100000) << (8+2-5)) + ((sOpt & 0b0000000000011111) << (0+3)));
     }
     markForReset();
     stateChanged = true; // send UDP/WS broadcast

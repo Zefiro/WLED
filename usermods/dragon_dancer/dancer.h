@@ -1,9 +1,16 @@
+// TODO
+// simplify directional toggle and check if it works
+// use SEGENV.step (and possibly SEGENV.aux0) for current index instead of basing blend_index_current on strip.now
+// look again into palettes
+// try WLED OTA update
+
+
 #pragma once
 
 #include "wled.h"
 #include "../wled00/FX.h"
 
-#define DANCER_DEBUG_OUTPUT true // uses Serial.println for debugging
+#define DANCER_DEBUG_OUTPUT false // uses Serial.println for debugging
 #define FX_MODE_DANCER 200
 /*
 Name@ sliders ; colors ; palette ; flags ; commands
@@ -17,16 +24,16 @@ flags: string, optional, a number, defined in index.js/populateEffects() as "m",
 commands:
   CSV of key=val
   sx=default value for speed
-  ix=default value for speed
+  ix=default value for intensity
   c1/c2/c3=default value for the custom sliders
   o1/o2/o3=default value for the checkboxes (0/1)
   pal=set a specific palette (palette and effect IDs are shown in tooltip)
   m12=2D matrix related number, defined in index.js populateSegments map2D
   si= sound sim (shown in segment config)
-  col1/col2/col3=Custom command to set segment colors. Needs the 32bit color value in decimal format.
+  col1/col2/col3=Custom command to set segment colors. As only int16_t is available, use 5-6-5 format: RRRRR GGGGGG BBBBB
   
 Commands are set in the Backend, FX_fcn.cpp Segment::setMode() using extractModeDefaults().
-Only those keys which are explicitely listed there can be set.alignas
+Only those keys which are explicitely listed there can be set.
 
 Frontend in index.js
 on load, /json/effects (names of all effects) and /json/fxdata (effect data, part after the @) is loaded.
@@ -83,8 +90,9 @@ JSON as sniffed from the network tab:
 	}
 }
 */
-static const char _data_FX_MODE_DANCER[] PROGMEM = "Dancer@Color speed,Circle speed,Circle Strength,,,Mirrored,Flipped;;;;sx=55,ix=125,c1=111,o1=1,o2=1";
-static const char _data_FX_MODE_DANCER_HELPER[] PROGMEM = "(Dancer Helper)@Offset x10,,,,,Current,Saved,Origin;Current,Saved,Origin;;1;sx=0,bri=128,o1=1,o2=1,o3=1,col1=16711680,col2=65280,col3=255";
+static const char _data_FX_MODE_DANCER[] PROGMEM = "Dancer@Color speed,Circle speed,Circle Dimming,Tail Length,,Mirrored,Flipped,Reverse;;;;sx=73,ix=135,c1=50,c2=0,o1=1,o2=1,o3=1";
+//colorful: static const char _data_FX_MODE_DANCER[] PROGMEM = "Dancer@Color speed,Circle speed,Circle Dimming,Tail Length,,Mirrored,Flipped,Reverse;;;;sx=250,ix=128,c1=50,c2=63,o1=0,o2=1,o3=0";
+static const char _data_FX_MODE_DANCER_HELPER[] PROGMEM = "(Dancer Helper)@Offset x10,,,,,Current,Saved,Origin;Current,Saved,Origin;;1;sx=0,bri=128,o1=1,o2=1,o3=1,col1=63488,col2=2016,col3=31";
 // static const char _data_FX_MODE_EXAMPLE[] PROGMEM = "Effect Name@Slider 1,Slider 2,Slider 3,Slider 4,Slider 5,Checkbox 1,Checkbox 1,Checkbox 1;col1,c2lor,3col,ccl4?;!;012vf;sx=1,ix=2,c1=3,c2=4,c3=5,o1=1,o2=1,o3=1,pal=50,mi=true,bri=128,m12=2,si=1";
 
 #define MAX_BLEND_ENTRIES 20
@@ -101,29 +109,52 @@ struct dancer_blendTable {
   struct dancer_blendentry entries[MAX_BLEND_ENTRIES];
 };
 
+#define DANCER_BLENDTABLE
+
+#ifdef DANCER_BLENDTABLE
 #define DANCER_BALL_LENGTH 16 // number of LEDs in a ball
 #define DANCER_BALL_OFFSET 200 // offset for the ball color in the blend table
 // note: lensum and totalLen are not set in this struct, but calculated in initBlendTable()
 struct dancer_blendTable blendTable = {
-  17, 0,
-  { { { 0xFF, 0x00, 0x00 }, 200, 0 },
-    { { 0xFF, 0x00, 0x00 }, 150, 0 }, //    0: red
+  16, 0,
+  { { { 0xFF, 0x00, 0x00 }, 150, 0 }, //    0: red
     { { 0xFF, 0x00, 0x00 },  25, 0 },
     { { 0xFF, 0xFF, 0x00 },  25, 0 },
-    { { 0x00, 0xFF, 0xFF }, 150, 0 }, //  600: cyan
-    { { 0x00, 0xFF, 0xFF },  25, 0 },
+    { { 0x00, 0xFF, 0xFF }, 150, 0 }, //  200: cyan
+    { { 0x00, 0xFF, 0xFF },  50, 0 },
     { { 0x00, 0xFF, 0x00 }, 150, 0 }, //  400: green
     { { 0x00, 0xFF, 0x00 },  25, 0 },
     { { 0xFF, 0xFF, 0x00 },  25, 0 },
-    { { 0xFF, 0x00, 0xFF }, 150, 0 }, // 1000: violet
+    { { 0xFF, 0x00, 0xFF }, 150, 0 }, //  600: violet
     { { 0xFF, 0x00, 0xFF },  25, 0 },
     { { 0xFF, 0x00, 0x00 },  25, 0 },
-    { { 0xFF, 0xFF, 0x00 }, 150, 0 }, //  200: yellow
+    { { 0xFF, 0xFF, 0x00 }, 150, 0 }, //  800: yellow
     { { 0xFF, 0xFF, 0x00 },  25, 0 },
     { { 0x00, 0xFF, 0x00 },  25, 0 },
-    { { 0x00, 0x00, 0xFF }, 150, 0 }, //  800: blue
-    { { 0x00, 0x00, 0xFF },  50, 0 } }
+    { { 0x00, 0x00, 0xFF }, 150, 0 }, // 1000: blue
+    { { 0x00, 0x00, 0xFF },  50, 0 } }// total 1200
 };
+#else // DANCER_BLENDTABLE
+#define DANCER_BALL_LENGTH 16 // number of LEDs in a ball
+#define DANCER_BALL_OFFSET 200 // offset for the ball color in the blend table
+#define dragon_flex_a 5    // skew linear: value to set at specified position
+#define dragon_flex_b 170  // skew linear: position where to set the specified value
+#define  dragon_flex_c 50   // time (in ticks) to show pure red
+
+// note: lensum and totalLen are not set in this struct, but calculated in initBlendTable()
+struct dancer_blendTable blendTable = { // full rainbow (red-enhanced) in 3650 ticks
+  9, 0, {
+    { { 0x00, 0xFF, 0x00 }, 600, 0 },
+    { { 0x00, 0xFF, 0xFF }, 600, 0 },
+    { { 0x00, 0x00, 0xFF }, 600, 0 },
+    { { 0xFF, 0x00, 0xFF }, 600 - dragon_flex_b, 0 },
+    { { 0xFF, 0x00, dragon_flex_a }, dragon_flex_b, 0 },
+    { { 0xFF, 0x00, 0x00 }, dragon_flex_c, 0 },
+    { { 0xFF, 0x00, 0x00 }, dragon_flex_b, 0 },
+    { { 0xFF, dragon_flex_a, 0x00 }, 600 - dragon_flex_b, 0 },
+    { { 0xFF, 0xFF, 0x00 }, 600, 0 },
+  }};
+#endif // DANCER_BLENDTABLE
 
 #define DANCER_MAX_BALLS 6
 // how many leds offset we need to get from led index 0 to the "led on the upper side of the circle" (based on measurement of Dancer hardware)
@@ -212,45 +243,77 @@ private:
 
   static uint16_t fxDancer() {
     // configuration parameters.
-    uint8_t speed = SEGMENT.speed == 0 ? 0 : 256-SEGMENT.speed; // was: 55 -> 5 steps per second, needs 40 seconds per color (lower is faster)
-    uint16_t px_dimm = 256 - SEGMENT.custom1; // was: 111 -> 0..255, 128 = no dimming, 0 = full dimming
+    uint8_t speed = SEGMENT.speed;
+    uint16_t px_dimm = 256 - SEGMENT.custom1; // dimm strength, 0=no dimming, 255=full dimming (inverted because we multiply and divide by 256)
     bool mirror = SEGMENT.check1; // off = hard edge but more noticeable effect, on = more subtle but smooth
     bool toggleCircleDirection = SEGMENT.check2; // toggle circle movement direction for each ball
-    uint_fast16_t curPxDimm = 0;
+    uint16_t curPxDimm = 0;
 
     CRGB c;
     // current ball index, 0..DANCER_MAX_BALLS-1
     uint8_t ballIdx = DANCER_MAX_BALLS;
     // current pixel index in the ball, 0..DANCER_BALL_LENGTH-1
-    uint8_t idxInBall = DANCER_BALL_LENGTH;
+    uint16_t idxInBall = DANCER_BALL_LENGTH;
     // segment pixel index of first pixel in the current ball
     uint16_t ballStartIdx = 0;
     // current color index in blendTable
     uint8_t cci = 0;
     // optimization: if the same as cci, we don't need to recalculate rgb
     uint8_t cached_cci = -1; // cache starts invalid
-    uint16_t len = 0;
-    // current rgb color
+    // current color in blendTable
     uint8_t r = 0, g = 0, b = 0;
     // delta to next color in blendTable
     int16_t dr = 0, dg = 0, db = 0;
+    // current length to next color in blendTable
+    uint16_t len = 0;
     // color offset in blendTable for this ball
     uint8_t color_offset;
-    // per-pixel color offset (not used in this effect, as we use dimming instead)
-    uint16_t px_offset = 0;
+    // per-pixel color offset (16.16 fixed point)
+    uint32_t px_offset_fp = 0;
     // number of leds to be computed in a ball
     uint16_t px_count = mirror ? (DANCER_BALL_LENGTH >> 1) + 1 : DANCER_BALL_LENGTH;
-    //
-    int32_t blend_index_current = 0;
+    // index in blendTable: for the first led of a ball, for the current led in the loop
+    uint32_t blend_index_current_fp = 0; // 16.16 fixed point
+    uint32_t blend_index_current = 0;
     // speed (and direction) to rotate the circle
-    int16_t circleSpeed = 0;
+    uint16_t circleSpeed = SEGMENT.intensity - 128; // == 0 ? 0 : 256-SEGMENT.intensity;
     // current position in the circle
     int32_t circle_offset_current = 0;
+    // if it's an even ball and toggle direction is activated
+    bool isToggledDirection = false;
 
-    // TODO: this is how fx.cpp does it
-    uint32_t cycleTime = (255 - SEGMENT.speed)*20;
-    uint32_t rem = strip.now % cycleTime;
+    int32_t nowUp = millis(); // we can't use strip.now, as this is millis() at start of the effect offset by an unknown timebase, whereas strip.getLastShow() is millis() at the end(!) of last show(), without offset
+    int32_t nowDiff = nowUp - strip.getLastShow();
 
+    double desiredDuration_s = -1.0;
+    double inc = 0;
+    uint32_t inc2 = 0;
+    if (speed != 0) {
+//      double k = powf(10, 1.0/64); // 64 values per decade, ~1...~9600
+//      double desiredDuration_s = powf(k, 256-speed); // desired duration -> about 1s to 2h40m speed slider range
+      desiredDuration_s = powf(10, (256-speed)/52.0) / 10; // desired duration -> about 0.1s to 2h13 speed slider range
+      inc = (blendTable.totalLen << 16) / desiredDuration_s / 1000; // inc per millisecond
+      inc2 = static_cast<uint32_t>(inc * nowDiff);
+      SEGMENT.step = (SEGMENT.step + inc2) % (blendTable.totalLen << 16);
+    }
+
+    uint16_t virtualLength = 0;
+    if (SEGMENT.custom2 > 0) {
+      virtualLength = powf(10, SEGMENT.custom2/52.0); // full length of BlendTable would need this many LEDs (magic value 52 to get a reasonable slider range)
+      double inc = (blendTable.totalLen << 16) / virtualLength; // inc per LED
+      if (SEGMENT.check3) inc = (blendTable.totalLen << 16) - inc; // reverse direction
+      px_offset_fp = static_cast<uint32_t>(inc);
+    } else {
+      px_offset_fp = 0;
+    }
+
+    if (circleSpeed != 0) {
+      // circleSpeed multiplicator is somewhat arbitrary to get a good effect in a reasonable speed slider range
+      SEGMENT.aux0 = (SEGMENT.aux0 + (DANCER_BALL_LENGTH << 10) + (nowDiff * circleSpeed)) % (DANCER_BALL_LENGTH << 10);
+    }
+    uint16_t circle_time_offset = SEGMENT.aux0 >> 10;
+
+    
     // loop over all pixels we are responsible for in this segment
     for(uint16_t pxIdx = 0; pxIdx < SEGMENT.length(); pxIdx++) {
 
@@ -265,43 +328,37 @@ private:
         // init for each ball
         ballStartIdx = ballIdx * DANCER_BALL_LENGTH;
         color_offset = ballIdx * DANCER_BALL_OFFSET;
-        if (SEGMENT.intensity != 0) {
-          if (toggleCircleDirection && (ballIdx & 1)) {
-            circleSpeed = SEGMENT.intensity-256;
-          } else {
-            circleSpeed = 256-SEGMENT.intensity;
-          }
-          circleSpeed *= 2; // better match the slider range
-        }
-  //      blend_index_current = (color_offset + (speed == 0 ? 0 : speed > 0 ? strip.now / speed : blendTable.totalLen - 1 + (strip.now / speed))) % blendTable.totalLen;
-        blend_index_current = speed == 0 ? 0 : strip.now / speed;
-        blend_index_current = (blend_index_current + color_offset) % blendTable.totalLen;
+
+        blend_index_current_fp = SEGMENT.step + (color_offset << 16);
 
         circle_offset_current = DANCER_CIRCLE_OFFSET[ballIdx % DANCER_MAX_BALLS];
         
-        if (circleSpeed > 0) {
-          uint32_t circle_time_offset = strip.now / circleSpeed / 2;
+        isToggledDirection = toggleCircleDirection && (ballIdx & 1);
+        if (isToggledDirection) { // even ball
           circle_offset_current += circle_time_offset;
-        } else if (circleSpeed < 0) {
-          uint32_t circle_time_offset = strip.now / (-circleSpeed) / 2;
-          circle_offset_current += SEGMENT.length() - 1 - (circle_time_offset % SEGMENT.length());
-        } 
+        } else { // odd ball
+          circle_offset_current += DANCER_BALL_LENGTH - circle_time_offset;
+        }
         curPxDimm = SEGMENT.currentBri();
-        if (DANCER_DEBUG_OUTPUT && (strip.now % 1000 < FRAMETIME))
-          Serial.println("ballIdx=" + String(ballIdx) + ", blend_index_current=" + String(blend_index_current) +
-          ", circleSpeed=" + String(circleSpeed) + ", circle_offset=" + String(circle_offset_current) + ", speed=" + String(speed) + 
+        if (DANCER_DEBUG_OUTPUT && (strip.now % 1000 < FRAMETIME) && ballIdx == 0) {
+          Serial.print("ballIdx=" + String(ballIdx) + ", blend_index_current=" + String(blend_index_current_fp >> 16) +
+          ", circleSpeed=" + String(circleSpeed) + ", circle_offset=" + String(circle_offset_current) + ", speed=" + String(speed) + ", desiredDuration_s=" + String(desiredDuration_s) + ", virtualLength=" + String(virtualLength) +
           ", curPxDimm=" + String(curPxDimm) + ", px_dimm=" + String(px_dimm) + ", pxIdx=" + String(pxIdx) + ", idxInBall=" + String(idxInBall) + 
-          ", ballStartIdx=" + String(ballStartIdx));
+          ", ballStartIdx=" + String(ballStartIdx) + ", nowDiff=" + nowDiff + ", inc=" + String(inc) + ", inc2=" + String(inc2) + ", step=");
+          Serial.println(SEGMENT.step, HEX);
+        }
       }
       if (idxInBall >= px_count) {
         // skip this pixel, as it's already set by the mirrored pixel
         continue;
       }
+
+      blend_index_current = blend_index_current_fp >> 16;
     
       // limit ball color offset to total range of color-blend table
-      if (blend_index_current >= blendTable.totalLen) { blend_index_current %= blendTable.totalLen; }
-      if (blend_index_current < 0) { blend_index_current = blendTable.totalLen - 1 - ((blend_index_current) % blendTable.totalLen); }
-    
+      while (blend_index_current >= blendTable.totalLen) { blend_index_current -= blendTable.totalLen; }
+      while (blend_index_current < 0) { blend_index_current += blendTable.totalLen ; }
+      
       // calculate current color index (cci) in the color-blend blendTable
         uint16_t lensum = blendTable.entries[cci].lensum;
         while (blend_index_current < lensum) {
@@ -320,7 +377,7 @@ private:
           lensum = blendTable.entries[cci].lensum;
         }
         // relative position inside the current color-blend blendTable entry
-        uint16_t pos = blend_index_current - blendTable.entries[cci].lensum;
+        uint16_t pos = blend_index_current - lensum;
 
         // cache some values
         if (cached_cci != cci) { // cache still valid?
@@ -347,21 +404,23 @@ private:
         }
 
         // set color
-        uint16_t dst_idx = ballStartIdx + ((circle_offset_current + idxInBall) % DANCER_BALL_LENGTH);
-        if (dst_idx < SEGMENT.length()) {
-          SEGMENT.setPixelColor(dst_idx, c);
+        if (((circleSpeed >= 0) != isToggledDirection) || mirror) { // there's no XOR in C++, so we use != on two booleans instead
+          uint16_t dst_idx = ballStartIdx + ((circle_offset_current + idxInBall) % DANCER_BALL_LENGTH);
+          if (dst_idx < SEGMENT.length()) {
+            SEGMENT.setPixelColor(dst_idx, c);
+          }
         }
     
-        if (mirror) {
+        if (((circleSpeed < 0) != isToggledDirection) || mirror) {
           // set mirrored pixel
           uint16_t dst_idx2 = ballStartIdx + ((DANCER_BALL_LENGTH + circle_offset_current - idxInBall) % DANCER_BALL_LENGTH);
-          if (dst_idx2 != dst_idx && dst_idx2 < SEGMENT.length()) {
+          if (dst_idx2 < SEGMENT.length()) {
             SEGMENT.setPixelColor(dst_idx2, c);
           }
         }
 
         // calculate per-led (pixel) offset inside this segment for next loop iteration
-        blend_index_current = (blendTable.totalLen + blend_index_current + (px_offset % blendTable.totalLen)) % blendTable.totalLen;
+        blend_index_current_fp = (blend_index_current_fp + px_offset_fp) % (blendTable.totalLen << 16);
         curPxDimm = (curPxDimm * px_dimm) >> 8;
     }
 
@@ -385,10 +444,10 @@ private:
       if (idxInBall == 0 && SEGMENT.check3) {
         c = color_add(c, SEGMENT.colors[2], true);
       }
-      if (((idxInBall + DANCER_CIRCLE_OFFSET[ballIdx]) % DANCER_BALL_LENGTH == 0) && SEGMENT.check2) {
+      if ((DANCER_CIRCLE_OFFSET[ballIdx] % DANCER_BALL_LENGTH == idxInBall) && SEGMENT.check2) {
         c = color_add(c, SEGMENT.colors[1], true);
       }      
-      if (((idxInBall + offset) % DANCER_BALL_LENGTH == 0) && SEGMENT.check1) {
+      if ((offset % DANCER_BALL_LENGTH == idxInBall) && SEGMENT.check1) {
         c = color_add(c, SEGMENT.colors[0], true);
       }
       SEGMENT.setPixelColor(pxIdx, c);

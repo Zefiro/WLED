@@ -39,7 +39,7 @@
 	// "forwardPorts": [],
 
 	// map USBserial into container for upload
-	"runArgs": [ "--device=/dev/ttyUSB0" ],
+//	"runArgs": [ "--device=/dev/ttyUSB0" ],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	"postCreateCommand": "npm install && /home/vscode/.platformio/penv/bin/pip install intelhex",

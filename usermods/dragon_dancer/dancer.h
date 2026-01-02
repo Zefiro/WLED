@@ -158,7 +158,7 @@ struct dancer_blendTable blendTable = { // full rainbow (red-enhanced) in 3650 t
 
 #define DANCER_MAX_BALLS 6
 // how many leds offset we need to get from led index 0 to the "led on the upper side of the circle" (based on measurement of Dancer hardware)
-uint8_t DANCER_CIRCLE_OFFSET[DANCER_MAX_BALLS] = { 4, 5, 3, 10, 9, 10 };
+uint8_t DANCER_CIRCLE_OFFSET[DANCER_MAX_BALLS] = { 9, 10, 7, 16, 15, 1 };
 
 uint8_t map2(int8_t a, int32_t b, int32_t y, uint16_t z) {
 	return ((uint8_t) (b * z / y)) + a;
@@ -267,7 +267,7 @@ private:
     // current length to next color in blendTable
     uint16_t len = 0;
     // color offset in blendTable for this ball
-    uint8_t color_offset;
+    uint32_t color_offset;
     // per-pixel color offset (16.16 fixed point)
     uint32_t px_offset_fp = 0;
     // number of leds to be computed in a ball

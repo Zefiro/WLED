@@ -225,6 +225,10 @@
   #include "../usermods/dont_blink/dont_blink.h"
 #endif
 
+#ifdef USERMOD_GAMES
+  #include "../usermods/games/games.h"
+#endif
+
 void registerUsermods()
 {
 /*
@@ -436,5 +440,9 @@ void registerUsermods()
 
   #ifdef USERMOD_DONT_BLINK
   usermods.add(new DontBlink());
+  #endif
+
+  #ifdef USERMOD_GAMES
+  usermods.add(new GamesMod());
   #endif
 }

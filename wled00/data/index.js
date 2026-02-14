@@ -1,13 +1,14 @@
 //page js
 var loc = false, locip, locproto = "http:";
 var isOn = false, nlA = false, isLv = false, isInfo = false, isNodes = false, syncSend = false/*, syncTglRecv = true*/;
-var hasWhite = false, hasRGB = false, hasCCT = false;
+var hasWhite = false, hasRGB = false, hasCCT = false, has2D = false;
 var nlDur = 60, nlTar = 0;
 var nlMode = false;
 var segLmax = 0; // size (in pixels) of largest selected segment
 var selectedFx = 0;
 var selectedPal = 0;
 var csel = 0; // selected color slot (0-2)
+var cpick; // iro color picker
 var currentPreset = -1;
 var lastUpdate = 0;
 var segCount = 0, ledCount = 0, lowestUnused = 0, maxSeg = 0, lSeg = 0;
@@ -16,13 +17,12 @@ var simplifiedUI = false;
 var tr = 7;
 var d = document;
 const ranges = RangeTouch.setup('input[type="range"]', {});
-var retry = false;
 var palettesData;
 var fxdata = [];
 var pJson = {}, eJson = {}, lJson = {};
 var plJson = {}; // array of playlists
 var pN = "", pI = 0, pNum = 0;
-var pmt = 1, pmtLS = 0, pmtLast = 0;
+var pmt = 1, pmtLS = 0;
 var lastinfo = {};
 var isM = false, mw = 0, mh=0;
 var ws, wsRpt=0;
@@ -35,29 +35,38 @@ var cfg = {
 // [year, month (0 -> January, 11 -> December), day, duration in days, image url]
 var hol = [
 	[0, 11, 24, 4, "https://aircoookie.github.io/xmas.png"],		// christmas
-	[0, 2, 17, 1, "https://images.alphacoders.com/491/491123.jpg"], // st. Patrick's day
-	[2025, 3, 20, 2, "https://aircoookie.github.io/easter.png"],	// easter 2025
-	[2024, 2, 31, 2, "https://aircoookie.github.io/easter.png"],	// easter 2024
+	[0, 2, 17, 1, "https://images.alphacoders.com/491/491123.jpg"],	// st. Patrick's day
+	[2026, 3, 5, 2, "https://aircoookie.github.io/easter.png"],		// easter 2026
+	[2027, 2, 28, 2, "https://aircoookie.github.io/easter.png"],	// easter 2027
+	//[2028, 3, 16, 2, "https://aircoookie.github.io/easter.png"],	// easter 2028
 	[0, 6, 4, 1, "https://images.alphacoders.com/516/516792.jpg"],	// 4th of July
 	[0, 0, 1, 1, "https://images.alphacoders.com/119/1198800.jpg"]	// new year
 ];
 
-var cpick = new iro.ColorPicker("#picker", {
-	width: 260,
-	wheelLightness: false,
-	wheelAngle: 270,
-	wheelDirection: "clockwise",
-	layout: [{
-		component: iro.ui.Wheel,
-		options: {}
-	}]
-});
+// load iro.js sequentially to avoid 503 errors, retries until successful
+(function loadIro() {
+	const l = d.createElement('script');
+	l.src = 'iro.js';
+	l.onload = () => {
+		cpick = new iro.ColorPicker("#picker", {
+			width: 260,
+			wheelLightness: false,
+			wheelAngle: 270,
+			wheelDirection: "clockwise",
+			layout: [{component: iro.ui.Wheel, options: {}}]
+		});
+		d.readyState === 'complete' ? onLoad() : window.addEventListener('load', onLoad);
+	};
+	l.onerror = () => setTimeout(loadIro, 100);
+	document.head.appendChild(l);
+})();
+
 
 function handleVisibilityChange() {if (!d.hidden && new Date () - lastUpdate > 3000) requestJson();}
 function sCol(na, col) {d.documentElement.style.setProperty(na, col);}
 function gId(c) {return d.getElementById(c);}
 function gEBCN(c) {return d.getElementsByClassName(c);}
-function isEmpty(o) {return Object.keys(o).length === 0;}
+function isEmpty(o) {for (const i in o) return false; return true;}
 function isObj(i) {return (i && typeof i === 'object' && !Array.isArray(i));}
 function isNumeric(n) {return !isNaN(parseFloat(n)) && isFinite(n);}
 
@@ -199,19 +208,17 @@ function loadBg() {
 	});
 }
 
-function loadSkinCSS(cId)
-{
-	if (!gId(cId))	// check if element exists
-	{
-		var h  = d.getElementsByTagName('head')[0];
-		var l  = d.createElement('link');
-		l.id   = cId;
-		l.rel  = 'stylesheet';
-		l.type = 'text/css';
+function loadSkinCSS(cId) {
+	return new Promise((resolve, reject) => {
+		if (gId(cId)) return resolve();
+		const l = d.createElement('link');
+		l.id = cId;
+		l.rel = 'stylesheet';
 		l.href = getURL('/skin.css');
-		l.media = 'all';
-		h.appendChild(l);
-	}
+		l.onload = resolve;
+		l.onerror = reject;
+		d.head.appendChild(l);
+	});
 }
 
 function getURL(path) {
@@ -272,23 +279,28 @@ function onLoad()
 
 	selectSlot(0);
 	updateTablinks(0);
+	handleLocationHash();
 	cpick.on("input:end", () => {setColor(1);});
 	cpick.on("color:change", () => {updatePSliders()});
 	pmtLS = localStorage.getItem('wledPmt');
 
-	// Load initial data
-	loadPalettes(()=>{
-		// fill effect extra data array
-		loadFXData(()=>{
-			// load and populate effects
-			loadFX(()=>{
-				loadPalettesData(()=>{
-					requestJson();// will load presets and create WS
-					if (cfg.comp.css) setTimeout(()=>{loadSkinCSS('skinCss')},50);
-				});
-			});
-		});
-	});
+	// Load initial data sequentially, no parallel requests to avoid "503" errors when heap is low (slower but much more reliable)
+	(async ()=>{
+		try {
+			await loadPalettes();        // loads base palettes and builds #pallist (safe first)
+			await loadFXData();          // loads fx data
+			await loadFX();              // populates effect list
+			await requestJson();         // updates info variables
+			await loadPalettesData();    // fills palettesData[] for previews
+			populatePalettes();          // repopulate with custom palettes now that cpalcount is known
+			if(pmt == pmtLS) populatePresets(true); // load presets from localStorage if signature matches (i.e. no device reboot)
+			else await loadPresets();    // load and populate presets
+			if (cfg.comp.css) await loadSkinCSS('skinCss');
+			if (!ws) makeWS();
+		} catch(e) {
+			showToast("Init failed: " + e, true);
+		}
+	})();
 	resetUtil();
 
 	d.addEventListener("visibilitychange", handleVisibilityChange, false);
@@ -304,7 +316,6 @@ function updateTablinks(tabI)
 {
 	var tablinks = gEBCN("tablinks");
 	for (var i of tablinks) i.classList.remove('active');
-	if (pcMode) return;
 	tablinks[tabI].classList.add('active');
 }
 
@@ -315,6 +326,21 @@ function openTab(tabI, force = false)
 	_C.classList.toggle('smooth', false);
 	_C.style.setProperty('--i', iSlide);
 	updateTablinks(tabI);
+	switch (tabI) {
+		case 0: window.location.hash = "Colors"; break;
+		case 1: window.location.hash = "Effects"; break;
+		case 2: window.location.hash = "Segments"; break;
+		case 3: window.location.hash = "Presets"; break;
+	}
+}
+
+function handleLocationHash() {
+	switch (window.location.hash) {
+		case "#Colors": openTab(0); break;
+		case "#Effects": openTab(1); break;
+		case "#Segments": openTab(2); break;
+		case "#Presets": openTab(3); break;
+	}
 }
 
 var timeout;
@@ -394,7 +420,9 @@ function pName(i)
 
 function isPlaylist(i)
 {
-	return pJson[i].playlist && pJson[i].playlist.ps;
+	if (isNumeric(i)) return pJson[i].playlist && pJson[i].playlist.ps;
+	if (isObj(i)) return i.playlist && i.playlist.ps;
+	return false;
 }
 
 function papiVal(i)
@@ -430,7 +458,7 @@ function presetError(empty)
 		if (bckstr.length > 10) hasBackup = true;
 	} catch (e) {}
 
-	var cn = `<div class="pres c" style="padding:8px;margin-bottom:8px;${empty?'':'cursor:pointer;'}" ${empty?'':'onclick="pmtLast=0;loadPresets();"'}>`;
+	var cn = `<div class="pres c" style="padding:8px;margin-bottom:8px;${empty?'':'cursor:pointer;'}" ${empty?'':'onclick="loadPresets();"'}>`;
 	if (empty)
 		cn += `You have no presets yet!`;
 	else
@@ -463,123 +491,81 @@ function restore(txt) {
 	return false;
 }
 
-function loadPresets(callback = null)
-{
-	// 1st boot (because there is a callback)
-	if (callback && pmt == pmtLS && pmt > 0) {
-		// we have a copy of the presets in local storage and don't need to fetch another one
-		populatePresets(true);
-		pmtLast = pmt;
-		callback();
-		return;
-	}
-
-	// afterwards
-	if (!callback && pmt == pmtLast) return;
-
-	fetch(getURL('/presets.json'), {
-		method: 'get'
-	})
-	.then(res => {
-		if (res.status=="404") return {"0":{}};
-		//if (!res.ok) showErrorToast();
-		return res.json();
-	})
-	.then(json => {
-		pJson = json;
-		pmtLast = pmt;
-		populatePresets();
-	})
-	.catch((e)=>{
-		//showToast(e, true);
-		presetError(false);
-	})
-	.finally(()=>{
-		if (callback) setTimeout(callback,99);
+async function loadPresets() {
+	return new Promise((resolve) => {
+		fetch(getURL('/presets.json'), {method: 'get'})
+		.then(res => res.status=="404" ? {"0":{}} : res.json())
+		.then(json => {
+			pJson = json;
+			populatePresets();
+			resolve();
+		})
+		.catch(() => {
+			presetError(false);
+			resolve();
+		})
 	});
 }
 
-function loadPalettes(callback = null)
-{
-	fetch(getURL('/json/palettes'), {
-		method: 'get'
-	})
-	.then((res)=>{
-		if (!res.ok) showErrorToast();
-		return res.json();
-	})
-	.then((json)=>{
-		lJson = Object.entries(json);
-		populatePalettes();
-		retry = false;
-	})
-	.catch((e)=>{
-		if (!retry) {
-			retry = true;
-			setTimeout(loadPalettes, 500); // retry
-		}
-		showToast(e, true);
-	})
-	.finally(()=>{
-		if (callback) callback();
-		updateUI();
+async function loadPalettes(retry=0) {
+	return new Promise((resolve) => {
+		fetch(getURL('/json/palettes'), {method: 'get'})
+		.then(res => res.ok ? res.json() : Promise.reject())
+		.then(json => {
+			lJson = Object.entries(json);
+			populatePalettes();
+			resolve();
+		})
+		.catch((e) => {
+			if (retry<5) {
+				setTimeout(() => loadPalettes(retry+1).then(resolve), 100);
+			} else {
+				showToast(e, true);
+				resolve();
+			}
+		});
 	});
 }
 
-function loadFX(callback = null)
-{
-	fetch(getURL('/json/effects'), {
-		method: 'get'
-	})
-	.then((res)=>{
-		if (!res.ok) showErrorToast();
-		return res.json();
-	})
-	.then((json)=>{
-		eJson = Object.entries(json);
-		populateEffects();
-		retry = false;
-	})
-	.catch((e)=>{
-		if (!retry) {
-			retry = true;
-			setTimeout(loadFX, 500); // retry
-		}
-		showToast(e, true);
-	})
-	.finally(()=>{
-		if (callback) callback();
-		updateUI();
+async function loadFX(retry=0) {
+	return new Promise((resolve) => {
+		fetch(getURL('/json/effects'), {method: 'get'})
+		.then(res => res.ok ? res.json() : Promise.reject())
+		.then(json => {
+			eJson = Object.entries(json);
+			populateEffects();
+			resolve();
+		})
+		.catch((e) => {
+			if (retry<5) {
+				setTimeout(() => loadFX(retry+1).then(resolve), 100);
+			} else {
+				showToast(e, true);
+				resolve();
+			}
+		});
 	});
 }
 
-function loadFXData(callback = null)
-{
-	fetch(getURL('/json/fxdata'), {
-		method: 'get'
-	})
-	.then((res)=>{
-		if (!res.ok) showErrorToast();
-		return res.json();
-	})
-	.then((json)=>{
-		fxdata = json||[];
-		// add default value for Solid
-		fxdata.shift()
-		fxdata.unshift(";!;");
-		retry = false;
-	})
-	.catch((e)=>{
-		fxdata = [];
-		if (!retry) {
-			retry = true;
-			setTimeout(loadFXData, 500); // retry
-		}
-		showToast(e, true);
-	})
-	.finally(()=>{
-		if (callback) callback();
-		updateUI();
+async function loadFXData(retry=0) {
+	return new Promise((resolve) => {
+		fetch(getURL('/json/fxdata'), {method: 'get'})
+		.then(res => res.ok ? res.json() : Promise.reject())
+		.then(json => {
+			fxdata = json||[];
+			fxdata.shift();
+			fxdata.unshift(";!;");
+			resolve();
+		})
+		.catch((e) => {
+			fxdata = [];
+			if (retry<5) {
+				setTimeout(() => loadFXData(retry+1).then(resolve), 100);
+			} else {
+				showToast(e, true);
+				resolve();
+			}
+		});
 	});
 }
 
@@ -601,7 +587,7 @@ function populateQL()
 function populatePresets(fromls)
 {
 	if (fromls) pJson = JSON.parse(localStorage.getItem("wledP"));
-	if (!pJson) {setTimeout(loadPresets,250); return;}
+	if (!pJson) {loadPresets(); return;} // note: no await as this is a fallback that should not be needed as init function fetches pJson
 	delete pJson["0"];
 	var cn = "";
 	var arr = Object.entries(pJson).sort(cmpP);
@@ -660,14 +646,13 @@ function parseInfo(i) {
 	mh = i.leds.matrix ? i.leds.matrix.h : 0;
 	isM = mw>0 && mh>0;
 	if (!isM) {
-		//gId("filter0D").classList.remove('hide');
-		//gId("filter1D").classList.add('hide');
 		gId("filter2D").classList.add('hide');
+		gId('bs').querySelectorAll('option[data-type="2D"]').forEach((o,i)=>{o.style.display='none';});
 	} else {
-		//gId("filter0D").classList.add('hide');
-		//gId("filter1D").classList.remove('hide');
 		gId("filter2D").classList.remove('hide');
+		gId('bs').querySelectorAll('option[data-type="2D"]').forEach((o,i)=>{o.style.display='';});
 	}
+	gId("updBt").style.display = (i.opt & 1) ? '':'none';
 //	if (i.noaudio) {
 //		gId("filterVol").classList.add("hide");
 //		gId("filterFreq").classList.add("hide");
@@ -676,16 +661,18 @@ function parseInfo(i) {
 //		gId("filterVol").classList.add("hide"); hideModes(" ♪"); // hide volume reactive effects
 //		gId("filterFreq").classList.add("hide"); hideModes(" ♫"); // hide frequency reactive effects
 //	}
+	// Check for version upgrades on page load
+	checkVersionUpgrade(i);
 }
 
 //https://stackoverflow.com/questions/2592092/executing-script-elements-inserted-with-innerhtml
 //var setInnerHTML = function(elm, html) {
 //	elm.innerHTML = html;
 //	Array.from(elm.querySelectorAll("script")).forEach( oldScript => {
-//	  const newScript = document.createElement("script");
+//	  const newScript = d.createElement("script");
 //	  Array.from(oldScript.attributes)
 //		.forEach( attr => newScript.setAttribute(attr.name, attr.value) );
-//	  newScript.appendChild(document.createTextNode(oldScript.innerHTML));
+//	  newScript.appendChild(d.createTextNode(oldScript.innerHTML));
 //	  oldScript.parentNode.replaceChild(newScript, oldScript);
 //	});
 //}
@@ -730,10 +717,10 @@ ${inforow("Environment",i.arch + " " + i.core + " (" + i.lwip + ")")}
 </table>`;
 	gId('kv').innerHTML = cn;
 	//  update all sliders in Info
-	for (let sd of (d.querySelectorAll('#kv .sliderdisplay')||[])) {
+	d.querySelectorAll('#kv .sliderdisplay').forEach((sd,i) => {
 		let s = sd.previousElementSibling;
 		if (s) updateTrail(s);
-	}
+	});
 }
 
 function populateSegments(s)
@@ -761,8 +748,8 @@ function populateSegments(s)
 		}
 
 		let segp = `<div id="segp${i}" class="sbs">`+
-						`<i class="icons slider-icon pwr ${inst.on ? "act":""}" id="seg${i}pwr" onclick="setSegPwr(${i})">&#xe08f;</i>`+
-						`<div class="sliderwrap il">`+
+						`<i class="icons slider-icon pwr ${inst.on ? "act":""}" id="seg${i}pwr" title="Power" onclick="setSegPwr(${i})">&#xe08f;</i>`+
+						`<div class="sliderwrap il" title="Opacity/Brightness">`+
 							`<input id="seg${i}bri" class="noslide" onchange="setSegBri(${i})" oninput="updateTrail(this)" max="255" min="1" type="range" value="${inst.bri}" />`+
 							`<div class="sliderdisplay"></div>`+
 						`</div>`+
@@ -786,18 +773,41 @@ function populateSegments(s)
 							`<option value="1" ${inst.m12==1?' selected':''}>Bar</option>`+
 							`<option value="2" ${inst.m12==2?' selected':''}>Arc</option>`+
 							`<option value="3" ${inst.m12==3?' selected':''}>Corner</option>`+
+							`<option value="4" ${inst.m12==4?' selected':''}>Pinwheel</option>`+
+						`</select></div>`+
+					`</div>`;
+		let blend = `<div class="lbl-l">Blend mode<br>`+
+						`<div class="sel-p"><select class="sel-ple" id="seg${i}bm" onchange="setBm(${i})">`+
+							`<option value="0" ${inst.bm==0?' selected':''}>Top/Default</option>`+
+							`<option value="1" ${inst.bm==1?' selected':''}>Bottom/None</option>`+
+							`<option value="2" ${inst.bm==2?' selected':''}>Add</option>`+
+							`<option value="3" ${inst.bm==3?' selected':''}>Subtract</option>`+
+							`<option value="4" ${inst.bm==4?' selected':''}>Difference</option>`+
+							`<option value="5" ${inst.bm==5?' selected':''}>Average</option>`+
+							`<option value="6" ${inst.bm==6?' selected':''}>Multiply</option>`+
+							`<option value="7" ${inst.bm==7?' selected':''}>Divide</option>`+
+							`<option value="8" ${inst.bm==8?' selected':''}>Lighten</option>`+
+							`<option value="9" ${inst.bm==9?' selected':''}>Darken</option>`+
+							`<option value="10" ${inst.bm==10?' selected':''}>Screen</option>`+
+							`<option value="11" ${inst.bm==11?' selected':''}>Overlay</option>`+
+							`<option value="12" ${inst.bm==12?' selected':''}>Hard Light</option>`+
+							`<option value="13" ${inst.bm==13?' selected':''}>Soft Light</option>`+
+							`<option value="14" ${inst.bm==14?' selected':''}>Dodge</option>`+
+							`<option value="15" ${inst.bm==15?' selected':''}>Burn</option>`+
 						`</select></div>`+
 					`</div>`;
 		let sndSim = `<div data-snd="si" class="lbl-s hide">Sound sim<br>`+
 						`<div class="sel-p"><select class="sel-p" id="seg${i}si" onchange="setSi(${i})">`+
 							`<option value="0" ${inst.si==0?' selected':''}>BeatSin</option>`+
 							`<option value="1" ${inst.si==1?' selected':''}>WeWillRockYou</option>`+
+							`<option value="2" ${inst.si==2?' selected':''}>10/13</option>`+
+							`<option value="3" ${inst.si==3?' selected':''}>14/3</option>`+
 						`</select></div>`+
 					`</div>`;
 		cn += `<div class="seg lstI ${i==s.mainseg && !simplifiedUI ? 'selected' : ''} ${exp ? "expanded":""}" id="seg${i}" data-set="${inst.set}">`+
 				`<label class="check schkl ${smpl}">`+
 					`<input type="checkbox" id="seg${i}sel" onchange="selSeg(${i})" ${inst.sel ? "checked":""}>`+
-					`<span class="checkmark"></span>`+
+					`<span class="checkmark" title="Select"></span>`+
 				`</label>`+
 				`<div class="segname ${smpl}" onclick="selSegEx(${i})">`+
 					`<i class="icons e-icon frz" id="seg${i}frz" title="(un)Freeze" onclick="event.preventDefault();tglFreeze(${i});">&#x${inst.frz ? (li.live && li.liveseg==i?'e410':'e0e8') : 'e325'};</i>`+
@@ -841,6 +851,7 @@ function populateSegments(s)
 					`</tr>`+
 					`</table>`+
 					`<div class="h bp" id="seg${i}len"></div>`+
+					blend +
 					(!isMSeg ? rvXck : '') +
 					(isMSeg&&stoY-staY>1&&stoX-staX>1 ? map2D : '') +
 					(s.AudioReactive && s.AudioReactive.on ? "" : sndSim) +
@@ -863,6 +874,7 @@ function populateSegments(s)
 	gId("segcont").classList.remove("hide");
 	let noNewSegs = (lowestUnused >= maxSeg);
 	resetUtil(noNewSegs);
+	if (segCount === 0) return; // no segments to populate
 	for (var i = 0; i <= lSeg; i++) {
 		if (!gId(`seg${i}`)) continue;
 		updateLen(i);
@@ -879,8 +891,8 @@ function populateSegments(s)
 	gId('segutil2').style.display = (segCount > 1) ? "block":"none"; // rsbtn parent
 
 	if (Array.isArray(li.maps) && li.maps.length>1) {
-		let cont = `Ledmap:&nbsp;<select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})"><option value="" selected>Unchanged</option>`;
-		for (const k of (li.maps||[])) cont += `<option value="${k.id}">${k.id==0?'Default':(k.n?k.n:'ledmap'+k.id+'.json')}</option>`;
+		let cont = `Ledmap:&nbsp;<select class="sel-sg" onchange="requestJson({'ledmap':parseInt(this.value)})">`;
+		for (const k of li.maps) cont += `<option ${s.ledmap===k.id?"selected":""} value="${k.id}">${k.id==0?'Default':(k.n?k.n:'ledmap'+k.id+'.json')}</option>`;
 		cont += "</select></div>";
 		gId("ledmap").innerHTML = cont;
 		gId("ledmap").classList.remove('hide');
@@ -969,19 +981,16 @@ function populatePalettes()
 			);
 		}
 	}
-	if (li.cpalcount>0) gId("rmPal").classList.remove("hide");
-	else                gId("rmPal").classList.add("hide");
 }
 
 function redrawPalPrev()
 {
-	let palettes = d.querySelectorAll('#pallist .lstI');
-	for (var pal of (palettes||[])) {
+	d.querySelectorAll('#pallist .lstI').forEach((pal,i) =>{
 		let lP = pal.querySelector('.lstIprev');
 		if (lP) {
 			lP.style = genPalPrevCss(pal.dataset.id);
 		}
-	}
+	});
 }
 
 function genPalPrevCss(id)
@@ -1001,8 +1010,7 @@ function genPalPrevCss(id)
 	}
 
 	var gradient = [];
-	for (let j = 0; j < paletteData.length; j++) {
-		const e = paletteData[j];
+	paletteData.forEach((e,j) => {
 		let r, g, b;
 		let index = false;
 		if (Array.isArray(e)) {
@@ -1024,9 +1032,8 @@ function genPalPrevCss(id)
 		if (index === false) {
 			index = Math.round(j / paletteData.length * 100);
 		}
-
 		gradient.push(`rgb(${r},${g},${b}) ${index}%`);
-	}
+	});
 
 	return `background: linear-gradient(to right,${gradient.join()});`;
 }
@@ -1056,6 +1063,11 @@ function btype(b)
 		case 34: return "ESP32-S3";
 		case 5:
 		case 35: return "ESP32-C3";
+		case 39: return "ESP32-C6";
+		case 40: return "ESP32-C61";
+		case 41: return "ESP32-C5";
+		case 42:
+		case 43: return "ESP32-P4";
 		case 1:
 		case 82: return "ESP8266";
 	}
@@ -1236,7 +1248,6 @@ function updateUI()
 	gId('buttonPower').className = (isOn) ? 'active':'';
 	gId('buttonNl').className = (nlA) ? 'active':'';
 	gId('buttonSync').className = (syncSend) ? 'active':'';
-	gId('pxmb').style.display = (isM) ? "inline-block" : "none";
 
 	updateSelectedFx();
 	updateSelectedPalette(selectedPal); // must be after updateSelectedFx() to un-hide color slots for * palettes
@@ -1284,7 +1295,8 @@ function updateSelectedPalette(s)
 	if (selElement) selElement.classList.remove('selected');
 
 	var selectedPalette = parent.querySelector(`.lstI[data-id="${s}"]`);
-	if (selectedPalette)  parent.querySelector(`.lstI[data-id="${s}"]`).classList.add('selected');
+	if (!selectedPalette) return; // palette not yet loaded (custom palette on initial load)
+	selectedPalette.classList.add('selected');
 
 	// Display selected palette name on button in simplified UI
 	let selectedName = selectedPalette.querySelector(".lstIname").innerText;
@@ -1327,7 +1339,7 @@ function updateSelectedFx()
 				if (ds.id>0) {
 					if (segLmax==0) fx.classList.add('hide'); // none of the segments selected (hide all effects)
 					else {
-						if ((segLmax==1 && (!opts[3] || opts[3].indexOf("0")<0)) || (!isM && opts[3] && ((opts[3].indexOf("2")>=0 && opts[3].indexOf("1")<0)))) fx.classList.add('hide');
+						if ((segLmax==1 && (!opts[3] || opts[3].indexOf("0")<0)) || (!has2D && opts[3] && ((opts[3].indexOf("2")>=0 && opts[3].indexOf("1")<0)))) fx.classList.add('hide');
 						else fx.classList.remove('hide');
 					}
 				}
@@ -1342,10 +1354,12 @@ function updateSelectedFx()
 		}
 
 		// hide 2D mapping and/or sound simulation options
-		var segs = gId("segcont").querySelectorAll(`div[data-map="map2D"]`);
-		for (const seg of segs) if (selectedName.indexOf("\u25A6")<0) seg.classList.remove('hide'); else seg.classList.add('hide');
-		var segs = gId("segcont").querySelectorAll(`div[data-snd="si"]`);
-		for (const seg of segs) if (selectedName.indexOf("\u266A")<0 && selectedName.indexOf("\u266B")<0) seg.classList.add('hide'); else seg.classList.remove('hide'); // also "♫ "?
+		gId("segcont").querySelectorAll(`div[data-map="map2D"]`).forEach((seg)=>{
+			if (selectedName.indexOf("\u25A6")<0) seg.classList.remove('hide'); else seg.classList.add('hide');
+		});
+		gId("segcont").querySelectorAll(`div[data-snd="si"]`).forEach((seg)=>{
+			if (selectedName.indexOf("\u266A")<0 && selectedName.indexOf("\u266B")<0) seg.classList.add('hide'); else seg.classList.remove('hide'); // also "♫ "?
+		});
 	}
 }
 
@@ -1396,11 +1410,11 @@ function makeWS() {
 	};
 	ws.onclose = (e)=>{
 		gId('connind').style.backgroundColor = "var(--c-r)";
-		if (wsRpt++ < 5) setTimeout(makeWS,1500); // retry WS connection
+		if (wsRpt++ < 10) setTimeout(makeWS,wsRpt * 200); // retry WS connection
 		ws = null;
 	}
 	ws.onopen = (e)=>{
-		//ws.send("{'v':true}"); // unnecessary (https://github.com/Aircoookie/WLED/blob/master/wled00/ws.cpp#L18)
+		//ws.send("{'v':true}"); // unnecessary (https://github.com/wled/WLED/blob/master/wled00/ws.cpp#L18)
 		wsRpt = 0;
 		reqsLegal = true;
 	}
@@ -1423,40 +1437,38 @@ function readState(s,command=false)
 
 	tr = s.transition;
 	gId('tt').value = tr/10;
+	gId('bs').value = s.bs || 0;
+	if (tr===0) gId('bsp').classList.add('hide')
+	else gId('bsp').classList.remove('hide')
 
 	populateSegments(s);
-	var selc=0;
-	var sellvl=0; // 0: selc is invalid, 1: selc is mainseg, 2: selc is first selected
-	hasRGB = hasWhite = hasCCT = false;
-	segLmax = 0;
-	for (let i = 0; i < (s.seg||[]).length; i++)
-	{
-		if (sellvl == 0 && s.seg[i].id == s.mainseg) {
-			selc = i;
-			sellvl = 1;
-		}
-		if (s.seg[i].sel) {
-			if (sellvl < 2) selc = i; // get first selected segment
-			sellvl = 2;
-			var lc = lastinfo.leds.seglc[i];
+	hasRGB = hasWhite = hasCCT = has2D = false;
+	segLmax = 0; // reset max selected segment length
+	let i = {};
+	// determine light capabilities from selected segments
+	for (let seg of (s.seg||[])) {
+		let w  = (seg.stop - seg.start);
+		let h  = seg.stopY ? (seg.stopY - seg.startY) : 1;
+		let lc = seg.lc;
+		if (w*h > segLmax) segLmax = w*h;
+		if (seg.sel) {
+			if (isEmpty(i) || (i.id == s.mainseg && !i.sel)) i = seg; // get first selected segment (and replace mainseg if it is not selected)
 			hasRGB   |= !!(lc & 0x01);
 			hasWhite |= !!(lc & 0x02);
 			hasCCT   |= !!(lc & 0x04);
-			let sLen = (s.seg[i].stop - s.seg[i].start)*(s.seg[i].stopY?(s.seg[i].stopY - s.seg[i].startY):1);
-			segLmax = segLmax < sLen ? sLen : segLmax;
-		}
+			has2D    |= w > 1 && h > 1;
+		} else if (isEmpty(i) && seg.id == s.mainseg) i = seg; // assign mainseg if no segments are selected
 	}
-	var i=s.seg[selc];
-	if (sellvl == 1) {
-		var lc = lastinfo.leds.seglc[selc];
-		hasRGB   = !!(lc & 0x01);
-		hasWhite = !!(lc & 0x02);
-		hasCCT   = !!(lc & 0x04);
-	}
-	if (!i) {
-		showToast('No Segments!', true);
+	if (isEmpty(i)) {
+		showToast('No segments!', true);
 		updateUI();
 		return true;
+	} else if (i.id == s.mainseg) {
+		// fallback if no segments are selected but we have mainseg
+		hasRGB   |= !!(i.lc & 0x01);
+		hasWhite |= !!(i.lc & 0x02);
+		hasCCT   |= !!(i.lc & 0x04);
+		has2D    |= (i.stop - i.start) > 1 && (i.stopY ? (i.stopY - i.startY) : 1) > 1;
 	}
 
 	var cd = gId('csl').querySelectorAll("button");
@@ -1482,6 +1494,15 @@ function readState(s,command=false)
 	if (s.error && s.error != 0) {
 		var errstr = "";
 		switch (s.error) {
+			case  1:
+				errstr = "Denied!";
+				break;
+			case  3:
+				errstr = "Buffer locked!";
+				break;
+			case  7:
+				errstr = "No RAM for buffer!";
+				break;
 			case  8:
 				errstr = "Effect RAM depleted!";
 				break;
@@ -1546,8 +1567,7 @@ function setEffectParameters(idx)
 	var paOnOff = (effectPars.length<3  || effectPars[2]=='')?[]:effectPars[2].split(",");
 
 	// set html slider items on/off
-	let sliders = d.querySelectorAll("#sliders .sliderwrap");
-	sliders.forEach((slider, i)=>{
+	d.querySelectorAll("#sliders .sliderwrap").forEach((slider, i)=>{
 		let text = slider.getAttribute("title");
 		if ((!controlDefined && i<((idx<128)?2:nSliders)) || (slOnOff.length>i && slOnOff[i]!="")) {
 			if (slOnOff.length>i && slOnOff[i]!="!") text = slOnOff[i];
@@ -1561,8 +1581,7 @@ function setEffectParameters(idx)
 
 	if (slOnOff.length > 5) { // up to 3 checkboxes
 		gId('fxopt').classList.remove('fade');
-		let checks = d.querySelectorAll("#sliders .ochkl");
-		checks.forEach((check, i)=>{
+		d.querySelectorAll("#sliders .ochkl").forEach((check, i)=>{
 			let text = check.getAttribute("title");
 			if (5+i<slOnOff.length && slOnOff[5+i]!=='') {
 				if (slOnOff.length>5+i && slOnOff[5+i]!="!") text = slOnOff[5+i];
@@ -1638,13 +1657,15 @@ function setEffectParameters(idx)
 			paOnOff[0] = paOnOff[0].substring(0,dPos);
 		}
 		if (paOnOff.length>0 && paOnOff[0] != "!") text = paOnOff[0];
+		gId("editPal").classList.remove("hide");
 	} else {
 		// disable palette list
 		text += ' not used';
 		palw.style.display = "none";
+		gId("editPal").classList.add("hide");
 		// Close palette dialog if not available
-		if (gId("palw").lastElementChild.tagName == "DIALOG") {
-			gId("palw").lastElementChild.close();
+		if (palw.lastElementChild.tagName == "DIALOG") {
+			palw.lastElementChild.close();
 		}
 	}
 	pall.innerHTML = icon + text;
@@ -1660,78 +1681,68 @@ function setEffectParameters(idx)
 
 var jsonTimeout;
 var reqsLegal = false;
+async function requestJson(command=null, retry=0) {
+	return new Promise((resolve, reject) => {
+		gId('connind').style.backgroundColor = "var(--c-y)";
+		if (command && !reqsLegal) {resolve(); return;}
+		if (!jsonTimeout) jsonTimeout = setTimeout(()=>{if (ws) ws.close(); ws=null; showErrorToast()}, 3000);
 
-function requestJson(command=null)
-{
-	gId('connind').style.backgroundColor = "var(--c-y)";
-	if (command && !reqsLegal) return; // stop post requests from chrome onchange event on page restore
-	if (!jsonTimeout) jsonTimeout = setTimeout(()=>{if (ws) ws.close(); ws=null; showErrorToast()}, 3000);
-	var req = null;
-	var useWs = (ws && ws.readyState === WebSocket.OPEN);
-	var type = command ? 'post':'get';
-	if (command) {
-		command.v = true; // force complete /json/si API response
-		command.time = Math.floor(Date.now() / 1000);
-		var t = gId('tt');
-		if (t.validity.valid && command.transition==null) {
-			var tn = parseInt(t.value*10);
-			if (tn != tr) command.transition = tn;
+		var useWs = (ws && ws.readyState === WebSocket.OPEN);
+		var req = null;
+		if (command) {
+			command.v = true;
+			command.time = Math.floor(Date.now() / 1000);
+			var t = gId('tt');
+			if (t && t.validity.valid && command.transition==null) {
+				var tn = parseInt(t.value*10);
+				if (tn != tr) command.transition = tn;
+			}
+			req = JSON.stringify(command);
+			if (req.length > 1340) useWs = false;
+			if (req.length > 500 && lastinfo && lastinfo.arch == "esp8266") useWs = false;
 		}
-		req = JSON.stringify(command);
-		if (req.length > 1340) useWs = false; // do not send very long requests over websocket
-		if (req.length >  500 && lastinfo && lastinfo.arch == "esp8266") useWs = false; // esp8266 can only handle 500 bytes
-	};
 
-	if (useWs) {
-		ws.send(req?req:'{"v":true}');
-		return;
-	}
-
-	fetch(getURL('/json/si'), {
-		method: type,
-		headers: {
-			"Content-type": "application/json; charset=UTF-8"
-		},
-		body: req
-	})
-	.then(res => {
-		clearTimeout(jsonTimeout);
-		jsonTimeout = null;
-		if (!res.ok) showErrorToast();
-		return res.json();
-	})
-	.then(json => {
-		lastUpdate = new Date();
-		clearErrorToast(3000);
-		gId('connind').style.backgroundColor = "var(--c-g)";
-		if (!json) { showToast('Empty response', true); return; }
-		if (json.success) return;
-		if (json.info) {
-			let i = json.info;
-			parseInfo(i);
-			populatePalettes(i);
-			if (isInfo) populateInfo(i);
-			if (simplifiedUI) simplifyUI();
+		if (useWs) {
+			ws.send(req?req:'{"v":true}');
+			resolve();
+			return;
 		}
-		var s = json.state ? json.state : json;
-		readState(s);
 
-		//load presets and open websocket sequentially
-		if (!pJson || isEmpty(pJson)) setTimeout(()=>{
-			loadPresets(()=>{
-				wsRpt = 0;
-				if (!(ws && ws.readyState === WebSocket.OPEN)) makeWS();
-			});
-		},25);
-		reqsLegal = true;
-		retry = false;
-	})
-	.catch((e)=>{
-		if (!retry) {
-			retry = true;
-			setTimeout(requestJson,500);
-		}
-		showToast(e, true);
+		fetch(getURL('/json/si'), {
+			method: command ? 'post' : 'get',
+			headers: {"Content-Type": "application/json; charset=UTF-8"},
+			body: req
+		})
+		.then(res => {
+			clearTimeout(jsonTimeout);
+			jsonTimeout = null;
+			return res.ok ? res.json() : Promise.reject();
+		})
+		.then(json => {
+			lastUpdate = new Date();
+			clearErrorToast(3000);
+			gId('connind').style.backgroundColor = "var(--c-g)";
+			if (!json) { showToast('Empty response', true); resolve(); return; }
+			if (json.success) {resolve(); return;}
+			if (json.info) {
+				parseInfo(json.info);
+				if (isInfo) populateInfo(json.info);
+				if (simplifiedUI) simplifyUI();
+			}
+			var s = json.state ? json.state : json;
+			readState(s);
+
+			reqsLegal = true;
+			resolve();
+		})
+		.catch((e)=>{
+			if (retry<10) {
+				setTimeout(() => requestJson(command,retry+1).then(resolve).catch(reject), retry*50);
+			} else {
+				showToast(e, true);
+				resolve();
+			}
+		});
 	});
 }
 
@@ -1860,7 +1871,7 @@ function makeSeg()
 function resetUtil(off=false)
 {
 	gId('segutil').innerHTML = `<div class="seg btn btn-s${off?' off':''}" style="padding:0;margin-bottom:12px;">`
-	+ '<label class="check schkl"><input type="checkbox" id="selall" onchange="selSegAll(this)"><span class="checkmark"></span></label>'
+	+ '<label class="check schkl"><input type="checkbox" id="selall" onchange="selSegAll(this)"><span class="checkmark" title="Select all"></span></label>'
 	+ `<div class="segname" ${off?'':'onclick="makeSeg()"'}><i class="icons btn-icon">&#xe18a;</i>Add segment</div>`
 	+ '<div class="pop hide" onclick="event.stopPropagation();">'
 	+ `<i class="icons g-icon" title="Select group" onclick="this.nextElementSibling.classList.toggle('hide');">&#xE34B;</i>`
@@ -1874,15 +1885,16 @@ function resetUtil(off=false)
 	if (lSeg>2) d.querySelectorAll("#Segments .pop").forEach((e)=>{e.classList.remove("hide");});
 }
 
-function makePlSel(el, incPl=false)
+function makePlSel(p, el)
 {
 	var plSelContent = "";
 	delete pJson["0"];	// remove filler preset
 	Object.entries(pJson).sort(cmpP).forEach((a)=>{
 		var n = a[1].n ? a[1].n : "Preset " + a[0];
+		if (isPlaylist(a[1])) n += ' &#9654;'; // mark playlist
 		if (cfg.comp.idsort) n = a[0] + ' ' + n;
-		if (!(!incPl && a[1].playlist && a[1].playlist.ps)) // skip playlists, sub-playlists not yet supported
-			plSelContent += `<option value="${a[0]}" ${a[0]==el?"selected":""}>${n}</option>`;
+		// skip endless playlists and itself
+		if (!isPlaylist(a[1]) || (a[1].playlist.repeat > 0 && a[0]!=p)) plSelContent += `<option value="${a[0]}" ${a[0]==el?"selected":""}>${n}</option>`;
 	});
 	return plSelContent;
 }
@@ -1907,21 +1919,23 @@ function refreshPlE(p)
 	});
 }
 
-// p: preset ID, i: ps index
+// p: preset ID, i: playlist item index
 function addPl(p,i)
 {
-	plJson[p].ps.splice(i+1,0,0);
-	plJson[p].dur.splice(i+1,0,plJson[p].dur[i]);
-	plJson[p].transition.splice(i+1,0,plJson[p].transition[i]);
+	const pl = plJson[p];
+	pl.ps.splice(i+1,0,1);
+	pl.dur.splice(i+1,0,pl.dur[i]);
+	pl.transition.splice(i+1,0,pl.transition[i]);
 	refreshPlE(p);
 }
 
 function delPl(p,i)
 {
-	if (plJson[p].ps.length < 2) return;
-	plJson[p].ps.splice(i,1);
-	plJson[p].dur.splice(i,1);
-	plJson[p].transition.splice(i,1);
+	const pl = plJson[p];
+	if (pl.ps.length < 2) return;
+	pl.ps.splice(i,1);
+	pl.dur.splice(i,1);
+	pl.transition.splice(i,1);
 	refreshPlE(p);
 }
 
@@ -1938,6 +1952,13 @@ function pleDur(p,i,field)
 
 function pleTr(p,i,field)
 {
+	const du = gId(`pl${p}du${i}`);
+	const dv = parseFloat(du.value);
+	if (dv > 0) {
+		field.max = dv;
+		if (parseFloat(field.value) > dv)
+			field.value = du.value;
+	}
 	if (field.validity.valid)
 		plJson[p].transition[i] = Math.floor(field.value*10);
 }
@@ -1957,6 +1978,17 @@ function plR(p)
 	}
 }
 
+function plM(p)
+{
+	const man = gId(`pl${p}manual`).checked;
+	plJson[p].dur.forEach((e,i)=>{
+		const d = gId(`pl${p}du${i}`);
+		plJson[p].dur[i] = e = man ? 0 : 100;
+		d.value = e/10; // 10s default 
+		d.readOnly = man;
+	});
+}
+
 function makeP(i,pl)
 {
 	var content = "";
@@ -1970,10 +2002,15 @@ function makeP(i,pl)
 			r: false,
 			end: 0
 		};
-		var rep = plJson[i].repeat ? plJson[i].repeat : 0;
+		const rep = plJson[i].repeat ? plJson[i].repeat : 0;
+		const man = plJson[i].dur == 0;
 		content =
 `<div id="ple${i}" style="margin-top:10px;"></div><label class="check revchkl">Shuffle
 	<input type="checkbox" id="pl${i}rtgl" onchange="plR(${i})" ${plJson[i].r||rep<0?"checked":""}>
+	<span class="checkmark"></span>
+</label>
+<label class="check revchkl">Manual advance
+	<input type="checkbox" id="pl${i}manual" onchange="plM(${i})" ${man?"checked":""}>
 	<span class="checkmark"></span>
 </label>
 <label class="check revchkl">Repeat indefinitely
@@ -1986,7 +2023,7 @@ function makeP(i,pl)
 <div class="sel-p"><select class="sel-ple" id="pl${i}selEnd" onchange="plR(${i})" data-val=${plJson[i].end?plJson[i].end:0}>
 <option value="0">None</option>
 <option value="255" ${plJson[i].end && plJson[i].end==255?"selected":""}>Restore preset</option>
-${makePlSel(plJson[i].end?plJson[i].end:0, true)}
+${makePlSel(i, plJson[i].end?plJson[i].end:0)}
 </select></div></div>
 </div>
 <div class="c"><button class="btn btn-p" onclick="testPl(${i}, this)"><i class='icons btn-icon'>&#xe139;</i>Test</button></div>`;
@@ -2009,7 +2046,7 @@ ${makePlSel(plJson[i].end?plJson[i].end:0, true)}
 </label>`;
 		if (Array.isArray(lastinfo.maps) && lastinfo.maps.length>1) {
 			content += `<div class="lbl-l">Ledmap:&nbsp;<div class="sel-p"><select class="sel-p" id="p${i}lmp"><option value="">Unchanged</option>`;
-			for (const k of (lastinfo.maps||[])) content += `<option value="${k.id}"${(i>0 && pJson[i].ledmap==k.id)?" selected":""}>${k.id==0?'Default':(k.n?k.n:'ledmap'+k.id+'.json')}</option>`;
+			for (const k of lastinfo.maps) content += `<option value="${k.id}"${(i>0 && pJson[i].ledmap==k.id)?" selected":""}>${k.id==0?'Default':(k.n?k.n:'ledmap'+k.id+'.json')}</option>`;
 			content += "</select></div></div>";
 		}
 	}
@@ -2059,25 +2096,26 @@ function makePUtil()
 
 function makePlEntry(p,i)
 {
+	const man = gId(`pl${p}manual`).checked;
 	return `<div class="plentry">
 	<div class="hrz"></div>
 	<table>
 	<tr>
 		<td width="80%" colspan=2>
 			<div class="sel-p"><select class="sel-pl" onchange="plePs(${p},${i},this)" data-val="${plJson[p].ps[i]}" data-index="${i}">
-			${makePlSel(plJson[p].ps[i])}
+			${makePlSel(p, plJson[p].ps[i])}
 			</select></div>
 		</td>
 		<td class="c"><button class="btn btn-pl-add" onclick="addPl(${p},${i})"><i class="icons btn-icon">&#xe18a;</i></button></td>
 	</tr>
 	<tr>
-		<td class="c">Duration</td>
+		<td class="c">Duration <i style="font-size:70%;">(0=inf.)</i></td>
 		<td class="c">Transition</td>
 		<td class="c">#${i+1}</td>
 	</tr>
 	<tr>
-		<td class="c" width="40%"><input class="segn" type="number" placeholder="Duration" max=6553.0 min=0.2 step=0.1 oninput="pleDur(${p},${i},this)" value="${plJson[p].dur[i]/10.0}">s</td>
-		<td class="c" width="40%"><input class="segn" type="number" placeholder="Transition" max=65.0 min=0.0 step=0.1 oninput="pleTr(${p},${i},this)" value="${plJson[p].transition[i]/10.0}">s</td>
+		<td class="c" width="40%"><input class="segn" type="number" placeholder="Duration" max=6553.0 min=0.0 step=0.1 oninput="pleDur(${p},${i},this)" value="${plJson[p].dur[i]/10.0}" id="pl${p}du${i}" ${man?"readonly":""}>s</td>
+		<td class="c" width="40%"><input class="segn" type="number" placeholder="Transition" max=65.0 min=0.0 step=0.1 oninput="pleTr(${p},${i},this)" onfocus="pleTr(${p},${i},this)" value="${plJson[p].transition[i]/10.0}">s</td>
 		<td class="c"><button class="btn btn-pl-del" onclick="delPl(${p},${i})"><i class="icons btn-icon">&#xe037;</i></button></div></td>
 	</tr>
 	</table>
@@ -2157,13 +2195,12 @@ function selGrp(g)
 {
 	event.preventDefault();
 	event.stopPropagation();
-	var sel = gId(`segcont`).querySelectorAll(`div[data-set="${g}"]`);
 	var obj = {"seg":[]};
 	for (let i=0; i<=lSeg; i++) if (gId(`seg${i}`)) obj.seg.push({"id":i,"sel":false});
-	for (let s of (sel||[])) {
+	gId(`segcont`).querySelectorAll(`div[data-set="${g}"]`).forEach((s)=>{
 		let i = parseInt(s.id.substring(3));
 		obj.seg[i] = {"id":i,"sel":true};
-	}
+	});
 	if (obj.seg.length) requestJson(obj);
 }
 
@@ -2277,6 +2314,13 @@ function setSi(s)
 {
 	var value = gId(`seg${s}si`).selectedIndex;
 	var obj = {"seg": {"id": s, "si": value}};
+	requestJson(obj);
+}
+
+function setBm(s)
+{
+	var value = gId(`seg${s}bm`).selectedIndex;
+	var obj = {"seg": {"id": s, "bm": value}};
 	requestJson(obj);
 }
 
@@ -2473,7 +2517,7 @@ function saveP(i,pl)
 	}
 	populatePresets();
 	resetPUtil();
-	setTimeout(()=>{pmtLast=0; loadPresets();}, 750); // force reloading of presets
+	setTimeout(()=>{loadPresets();}, 750); // force reloading of presets
 }
 
 function testPl(i,bt) {
@@ -2631,28 +2675,28 @@ function fromRgb()
 	var g = gId('sliderG').value;
 	var b = gId('sliderB').value;
 	setPicker(`rgb(${r},${g},${b})`);
-	let cd = gId('csl').children; // color slots
-	cd[csel].dataset.r = r;
-	cd[csel].dataset.g = g;
-	cd[csel].dataset.b = b;
-	setCSL(cd[csel]);
+	let cd = gId('csl').children[csel]; // color slots
+	cd.dataset.r = r;
+	cd.dataset.g = g;
+	cd.dataset.b = b;
+	setCSL(cd);
 }
 
 function fromW()
 {
 	let w = gId('sliderW');
-	let cd = gId('csl').children; // color slots
-	cd[csel].dataset.w = w.value;
-	setCSL(cd[csel]);
+	let cd = gId('csl').children[csel]; // color slots
+	cd.dataset.w = w.value;
+	setCSL(cd);
 	updateTrail(w);
 }
 
 // sr 0: from RGB sliders, 1: from picker, 2: from hex
 function setColor(sr)
 {
-	var cd = gId('csl').children; // color slots
-	let cdd = cd[csel].dataset;
-	let w = 0, r,g,b;
+	var cd = gId('csl').children[csel]; // color slots
+	let cdd = cd.dataset;
+	let w = parseInt(cdd.w), r = parseInt(cdd.r), g = parseInt(cdd.g), b = parseInt(cdd.b);
 	if (sr == 1 && isRgbBlack(cdd)) cpick.color.setChannel('hsv', 'v', 100);
 	if (sr != 2 && hasWhite) w = parseInt(gId('sliderW').value);
 	var col = cpick.color.rgb;
@@ -2660,7 +2704,7 @@ function setColor(sr)
 	cdd.g = g = hasRGB ? col.g : w;
 	cdd.b = b = hasRGB ? col.b : w;
 	cdd.w = w;
-	setCSL(cd[csel]);
+	setCSL(cd);
 	var obj = {"seg": {"col": [[],[],[]]}};
 	obj.seg.col[csel] = [r, g, b, w];
 	requestJson(obj);
@@ -2675,7 +2719,9 @@ function setBalance(b)
 function rmtTgl(ip,i) {
 	event.preventDefault();
 	event.stopPropagation();
-	fetch(`http://${ip}/win&T=2`, {method: 'get'})
+	fetch(`http://${ip}/win&T=2`, {
+		method: 'get'
+	})
 	.then((r)=>{
 		return r.text();
 	})
@@ -2701,7 +2747,7 @@ setInterval(()=>{
 	gId('heart').style.color = `hsl(${hc}, 100%, 50%)`;
 }, 910);
 
-function openGH() { window.open("https://github.com/Aircoookie/WLED/wiki"); }
+function openGH() { window.open("https://github.com/wled/WLED/wiki"); }
 
 var cnfr = false;
 function cnfReset()
@@ -2737,54 +2783,51 @@ function rSegs()
 	requestJson(obj);
 }
 
-function loadPalettesData(callback = null)
-{
-	if (palettesData) return;
-	const lsKey = "wledPalx";
-	var lsPalData = localStorage.getItem(lsKey);
-	if (lsPalData) {
-		try {
-			var d = JSON.parse(lsPalData);
-			if (d && d.vid == d.vid) {
-				palettesData = d.p;
-				if (callback) callback();
-				return;
-			}
-		} catch (e) {}
-	}
+function loadPalettesData() {
+	return new Promise((resolve) => {
+		if (palettesData) return resolve(); // already loaded
+		var lsPalData = localStorage.getItem("wledPalx");
+		if (lsPalData) {
+			try {
+				var d = JSON.parse(lsPalData);
+				if (d && d.vid == lastinfo.vid) {
+					palettesData = d.p;
+					redrawPalPrev();
+					return resolve();
+				}
+			} catch (e) {}
+		}
 
-	palettesData = {};
-	getPalettesData(0, ()=>{
-		localStorage.setItem(lsKey, JSON.stringify({
-			p: palettesData,
-			vid: lastinfo.vid
-		}));
-		redrawPalPrev();
-		if (callback) setTimeout(callback, 99);
+		palettesData = {};
+		getPalettesData(0, () => {
+			localStorage.setItem("wledPalx", JSON.stringify({
+				p: palettesData,
+				vid: lastinfo.vid
+			}));
+			redrawPalPrev();
+			setTimeout(resolve, 99); // delay optional
+		});
 	});
 }
 
-function getPalettesData(page, callback)
-{
-	fetch(getURL(`/json/palx?page=${page}`), {
-		method: 'get',
-		headers: {
-			"Content-type": "application/json; charset=UTF-8"
-		}
-	})
-	.then(res => {
-		if (!res.ok) showErrorToast();
-		return res.json();
-	})
+function getPalettesData(page, callback, retry=0) {
+	fetch(getURL(`/json/palx?page=${page}`), {method: 'get'})
+	.then(res => res.ok ? res.json() : Promise.reject())
 	.then(json => {
 		palettesData = Object.assign({}, palettesData, json.p);
-		if (page < json.m) setTimeout(()=>{ getPalettesData(page + 1, callback); }, 50);
+		if (page < json.m) setTimeout(()=>{ getPalettesData(page + 1, callback); }, 75);
 		else callback();
 	})
 	.catch((error)=>{
-		showToast(error, true);
+		if (retry<5) {
+			setTimeout(()=>{getPalettesData(page,callback,retry+1);}, 100);
+		} else {
+			showToast(error, true);
+			callback();
+		}
 	});
 }
+
 /*
 function hideModes(txt)
 {
@@ -2804,9 +2847,14 @@ function search(field, listId = null) {
 	const search = field.value !== '';
 
 	// restore default preset sorting if no search term is entered
-	if (listId === 'pcont' && !search) {
-		populatePresets();
-		return;
+	if (!search) {
+		if (listId === 'pcont') { populatePresets(); return; }
+		if (listId === 'pallist') {
+			let id = parseInt(d.querySelector('#pallist input[name="palette"]:checked').value); // preserve selected palette
+			populatePalettes();
+			updateSelectedPalette(id);
+			return;
+		}
 	}
 
 	// clear filter if searching in fxlist
@@ -2817,15 +2865,19 @@ function search(field, listId = null) {
 	// do not search if filter is active
 	if (gId("filters").querySelectorAll("input[type=checkbox]:checked").length) return;
 
-	const listItems = gId(listId).querySelectorAll('.lstI');
 	// filter list items but leave (Default & Solid) always visible
-	for (i = (listId === 'pcont' ? 0 : 1); i < listItems.length; i++) {
-		const listItem = listItems[i];
+	const listItems = gId(listId).querySelectorAll('.lstI');
+	listItems.forEach((listItem, i) => {
+		if (listId !== 'pcont' && i === 0) return;
 		const listItemName = listItem.querySelector('.lstIname').innerText.toUpperCase();
 		const searchIndex = listItemName.indexOf(field.value.toUpperCase());
-		listItem.style.display = (searchIndex < 0) ? 'none' : '';
-		listItem.dataset.searchIndex = searchIndex;
-	}
+		if (searchIndex < 0) {
+			listItem.dataset.searchIndex = Number.MAX_SAFE_INTEGER;
+		} else {
+			listItem.dataset.searchIndex = searchIndex;
+		}
+		listItem.style.display = (searchIndex < 0) && !listItem.classList.contains("selected") ? 'none' : '';
+	});
 
 	// sort list items by search index and name
 	const sortedListItems = Array.from(listItems).sort((a, b) => {
@@ -2865,18 +2917,25 @@ function initFilters() {
 
 function filterFocus(e) {
 	const f = gId("filters");
-	if (e.type === "focus") f.classList.remove('fade');	// immediately show (still has transition)
-	// compute sticky top (with delay for transition)
-	setTimeout(() => {
-		const sti = parseInt(getComputedStyle(d.documentElement).getPropertyValue('--sti')) + (e.type === "focus" ? 1 : -1) * f.offsetHeight;
-		sCol('--sti', sti + "px");
-	}, 252);
+	const c = !!f.querySelectorAll("input[type=checkbox]:checked").length;
+	const h = f.offsetHeight;
+	const sti = parseInt(getComputedStyle(d.documentElement).getPropertyValue('--sti'));
+	if (e.type === "focus") {
+		// compute sticky top (with delay for transition)
+		if (!h) setTimeout(() => {
+			sCol('--sti', (sti+f.offsetHeight) + "px"); // has an unpleasant consequence on palette offset
+		}, 255);
+		f.classList.remove('fade');	// immediately show (still has transition)
+	}
 	if (e.type === "blur") {
 		setTimeout(() => {
-			if (e.target === document.activeElement && document.hasFocus()) return;
+			if (e.target === d.activeElement && d.hasFocus()) return;
 			// do not hide if filter is active
-			if (gId("filters").querySelectorAll("input[type=checkbox]:checked").length) return;
-			f.classList.add('fade');
+			if (!c) {
+				// compute sticky top
+				sCol('--sti', (sti-h) + "px"); // has an unpleasant consequence on palette offset
+				f.classList.add('fade');
+			}
 		}, 255);	// wait with hiding
 	}
 }
@@ -2886,14 +2945,12 @@ function filterFx() {
 	inputField.value = '';
 	inputField.focus();
 	clean(inputField.nextElementSibling);
-	const listItems = gId("fxlist").querySelectorAll('.lstI');
-	for (let i = 1; i < listItems.length; i++) {
-		const listItem = listItems[i];
+	gId("fxlist").querySelectorAll('.lstI').forEach((listItem, i) => {
 		const listItemName = listItem.querySelector('.lstIname').innerText;
 		let hide = false;
-		gId("filters").querySelectorAll("input[type=checkbox]").forEach((e) => { if (e.checked && !listItemName.includes(e.dataset.flt)) hide = true; });
-		listItem.style.display = hide ? 'none' : '';
-	}
+		gId("filters").querySelectorAll("input[type=checkbox]").forEach((e) => { if (e.checked && !listItemName.includes(e.dataset.flt)) hide = i > 0 /*true*/; });
+		listItem.style.display = hide && !listItem.classList.contains("selected") ? 'none' : '';
+	});
 }
 
 function preventBlur(e) {
@@ -2987,11 +3044,9 @@ function unify(e) {	return e.changedTouches ? e.changedTouches[0] : e; }
 
 function hasIroClass(classList)
 {
-	for (var i = 0; i < classList.length; i++) {
-		var element = classList[i];
-		if (element.startsWith('Iro')) return true;
-	}
-	return false;
+	let found = false;
+	classList.forEach((e)=>{ if (e.startsWith('Iro')) found = true; });
+	return found;
 }
 //required by rangetouch.js
 function lock(e)
@@ -3044,6 +3099,7 @@ function size()
 
 function togglePcMode(fromB = false)
 {
+	let ap = (fromB && !lastinfo) || (lastinfo && lastinfo.wifi && lastinfo.wifi.ap);
 	if (fromB) {
 		pcModeA = !pcModeA;
 		localStorage.setItem('pcm', pcModeA);
@@ -3051,8 +3107,7 @@ function togglePcMode(fromB = false)
 	pcMode = (wW >= 1024) && pcModeA;
 	if (cpick) cpick.resize(pcMode && wW>1023 && wW<1250 ? 230 : 260); // for tablet in landscape
 	if (!fromB && ((wW < 1024 && lastw < 1024) || (wW >= 1024 && lastw >= 1024))) return; // no change in size and called from size()
-	openTab(0, true);
-	updateTablinks(0);
+	if (pcMode) openTab(0, true);
 	gId('buttonPcm').className = (pcMode) ? "active":"";
 	gId('bot').style.height = (pcMode && !cfg.comp.pcmbot) ? "0":"auto";
 	sCol('--bh', gId('bot').clientHeight + "px");
@@ -3079,9 +3134,8 @@ function mergeDeep(target, ...sources)
 
 function tooltip(cont=null)
 {
-	const elements = d.querySelectorAll((cont?cont+" ":"")+"[title]");
-	elements.forEach((element)=>{
-		element.addEventListener("mouseover", ()=>{
+	d.querySelectorAll((cont?cont+" ":"")+"[title]").forEach((element)=>{
+		element.addEventListener("pointerover", ()=>{
 			// save title
 			element.setAttribute("data-title", element.getAttribute("title"));
 			const tooltip = d.createElement("span");
@@ -3106,9 +3160,8 @@ function tooltip(cont=null)
 			tooltip.classList.add("visible");
 		});
 
-		element.addEventListener("mouseout", ()=>{
-			const tooltips = d.querySelectorAll('.tooltip');
-			tooltips.forEach((tooltip)=>{
+		element.addEventListener("pointerout", ()=>{
+			d.querySelectorAll('.tooltip').forEach((tooltip)=>{
 				tooltip.classList.remove("visible");
 				d.body.removeChild(tooltip);
 			});
@@ -3123,7 +3176,7 @@ function simplifyUI() {
 	// Create dropdown dialog
 	function createDropdown(id, buttonText, dialogElements = null) {
 		// Create dropdown dialog
-		const dialog = document.createElement("dialog");
+		const dialog = d.createElement("dialog");
 		// Move every dialogElement to the dropdown dialog or if none are given, move all children of the element with the given id
 		if (dialogElements) {
 			dialogElements.forEach((e) => {
@@ -3136,7 +3189,7 @@ function simplifyUI() {
 		}
 
 		// Create button for the dropdown
-		const btn = document.createElement("button");
+		const btn = d.createElement("button");
 		btn.id = id + "btn";
 		btn.classList.add("btn");
 		btn.innerText = buttonText;
@@ -3182,9 +3235,9 @@ function simplifyUI() {
 	createDropdown("palw", "Change palette");
 	createDropdown("fx", "Change effect", [gId("fxFind"), gId("fxlist")]);
 
-	// Hide pallete label
+	// Hide palette label
 	gId("pall").style.display = "none";
-	gId("Colors").insertBefore(document.createElement("br"), gId("pall"));
+	gId("Colors").insertBefore(d.createElement("br"), gId("pall"));
 	// Hide effect label
 	gId("modeLabel").style.display = "none";
 
@@ -3196,7 +3249,7 @@ function simplifyUI() {
 
 	// Hide bottom bar 
 	gId("bot").style.display = "none";
-	document.documentElement.style.setProperty('--bh', '0px');
+	d.documentElement.style.setProperty('--bh', '0px');
 
 	// Hide other tabs
 	gId("Effects").style.display = "none";
@@ -3210,10 +3263,202 @@ function simplifyUI() {
 	gId("btns").style.display = "none";
 }
 
+// Version reporting feature
+var versionCheckDone = false;
+
+function checkVersionUpgrade(info) {
+	// Only check once per page load
+	if (versionCheckDone) return;
+	versionCheckDone = true;
+
+	// Suppress feature if in AP mode (no internet connection available)
+	if (info.wifi && info.wifi.ap) return;
+
+	// Fetch version-info.json using existing /edit endpoint
+	fetch(getURL('/edit?func=edit&path=/version-info.json'), {
+		method: 'get'
+	})
+		.then(res => {
+			if (res.status === 404) {
+				// File doesn't exist - first install, show install prompt
+				showVersionUpgradePrompt(info, null, info.ver);
+				return null;
+			}
+			if (!res.ok) {
+				throw new Error('Failed to fetch version-info.json');
+			}
+			return res.json();
+		})
+		.then(versionInfo => {
+			if (!versionInfo) return; // 404 case already handled
+
+			// Check if user opted out
+			if (versionInfo.neverAsk) return;
+
+			// Check if version has changed
+			const currentVersion = info.ver;
+			const storedVersion = versionInfo.version || '';
+
+			if (storedVersion && storedVersion !== currentVersion) {
+				// Version has changed, show upgrade prompt
+				showVersionUpgradePrompt(info, storedVersion, currentVersion);
+			} else if (!storedVersion) {
+				// Empty version in file, show install prompt
+				showVersionUpgradePrompt(info, null, currentVersion);
+			}
+		})
+		.catch(e => {
+			console.log('Failed to load version-info.json', e);
+			// On error, save current version for next time
+			if (info && info.ver) {
+				updateVersionInfo(info.ver, false);
+			}
+		});
+}
+
+function showVersionUpgradePrompt(info, oldVersion, newVersion) {
+	// Determine if this is an install or upgrade
+	const isInstall = !oldVersion;
+
+	// Create overlay and dialog
+	const overlay = d.createElement('div');
+	overlay.id = 'versionUpgradeOverlay';
+	overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+
+	const dialog = d.createElement('div');
+	dialog.style.cssText = 'background:var(--c-1);border-radius:10px;padding:25px;max-width:500px;margin:20px;box-shadow:0 4px 6px rgba(0,0,0,0.3);';
+
+	// Build contextual message based on install vs upgrade
+	const title = isInstall
+		? '🎉 Thank you for installing WLED!'
+		: '🎉 WLED Upgrade Detected!';
+
+	const description = isInstall
+		? `You are now running WLED <strong style="text-wrap: nowrap">${newVersion}</strong>.`
+		: `Your WLED has been upgraded from <strong style="text-wrap: nowrap">${oldVersion}</strong> to <strong style="text-wrap: nowrap">${newVersion}</strong>.`;
+
+	const question = 'Help make WLED better with a one-time hardware report? It includes only device details like chip type, LED count, etc. — never personal data or your activities.'
+
+	dialog.innerHTML = `
+		<h2 style="margin-top:0;color:var(--c-f);">${title}</h2>
+		<p style="color:var(--c-f);">${description}</p>
+		<p style="color:var(--c-f);">${question}</p>
+		<p style="color:var(--c-f);font-size:0.9em;">
+			<a href="https://kno.wled.ge/about/privacy-policy/" target="_blank" style="color:var(--c-6);">Learn more about what data is collected and why</a>
+		</p>
+		<div style="margin-top:20px;">
+			<button id="versionReportYes" class="btn">Yes</button>
+			<button id="versionReportNo" class="btn">Not Now</button>
+			<button id="versionReportNever" class="btn">Never Ask</button>
+		</div>
+	`;
+
+	overlay.appendChild(dialog);
+	d.body.appendChild(overlay);
+
+	// Add event listeners
+	gId('versionReportYes').addEventListener('click', () => {
+		reportUpgradeEvent(info, oldVersion);
+		d.body.removeChild(overlay);
+	});
+
+	gId('versionReportNo').addEventListener('click', () => {
+		// Don't update version, will ask again on next load
+		d.body.removeChild(overlay);
+	});
+
+	gId('versionReportNever').addEventListener('click', () => {
+		updateVersionInfo(newVersion, true);
+		d.body.removeChild(overlay);
+		showToast('You will not be asked again.');
+	});
+}
+
+function reportUpgradeEvent(info, oldVersion) {
+	showToast('Reporting upgrade...');
+
+	// Fetch fresh data from /json/info endpoint as requested
+	fetch(getURL('/json/info'), {
+		method: 'get'
+	})
+		.then(res => res.json())
+		.then(infoData => {
+			// Map to UpgradeEventRequest structure per OpenAPI spec
+			// Required fields: deviceId, version, previousVersion, releaseName, chip, ledCount, isMatrix, bootloaderSHA256
+			const upgradeData = {
+				deviceId: infoData.deviceId,                     // Use anonymous unique device ID
+				version: infoData.ver || '',                     // Current version string
+				previousVersion: oldVersion || '',               // Previous version from version-info.json
+				releaseName: infoData.release || '',             // Release name (e.g., "WLED 0.15.0")
+				chip: infoData.arch || '',                       // Chip architecture (esp32, esp8266, etc)
+				ledCount: infoData.leds ? infoData.leds.count : 0,  // Number of LEDs
+				isMatrix: !!(infoData.leds && infoData.leds.matrix),  // Whether it's a 2D matrix setup
+				bootloaderSHA256: infoData.bootloaderSHA256 || '',   // Bootloader SHA256 hash
+				brand: infoData.brand,                           // Device brand (always present)
+				product: infoData.product,                       // Product name (always present)
+				flashSize: infoData.flash,                       // Flash size (always present)
+				repo: infoData.repo                              // GitHub repository (always present)
+			};
+
+			// Add optional fields if available
+			if (infoData.psrSz !== undefined) upgradeData.psramSize = infoData.psrSz;  // Total PSRAM size in MB; can be 0
+
+			// Note: partitionSizes not currently available in /json/info endpoint
+
+			// Make AJAX call to postUpgradeEvent API
+			return fetch('https://usage.wled.me/api/usage/upgrade', {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify(upgradeData)
+			});
+		})
+		.then(res => {
+			if (res.ok) {
+				showToast('Thank you for reporting!');
+				updateVersionInfo(info.ver, false);
+			} else {
+				showToast('Report failed. Please try again later.', true);
+				// Do NOT update version info on failure - user will be prompted again
+			}
+		})
+		.catch(e => {
+			console.log('Failed to report upgrade', e);
+			showToast('Report failed. Please try again later.', true);
+			// Do NOT update version info on error - user will be prompted again
+		});
+}
+
+function updateVersionInfo(version, neverAsk) {
+	const versionInfo = {
+		version: version,
+		neverAsk: neverAsk
+	};
+
+	// Create a Blob with JSON content and use /upload endpoint
+	const blob = new Blob([JSON.stringify(versionInfo)], {type: 'application/json'});
+	const formData = new FormData();
+	formData.append('data', blob, 'version-info.json');
+
+	fetch(getURL('/upload'), {
+		method: 'POST',
+		body: formData
+	})
+		.then(res => res.text())
+		.then(data => {
+			console.log('Version info updated', data);
+		})
+		.catch(e => {
+			console.log('Failed to update version-info.json', e);
+		});
+}
+
 size();
 _C.style.setProperty('--n', N);
 
 window.addEventListener('resize', size, true);
+window.addEventListener('hashchange', handleLocationHash);
 
 _C.addEventListener('mousedown', lock, false);
 _C.addEventListener('touchstart', lock, false);

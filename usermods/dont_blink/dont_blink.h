@@ -39,7 +39,7 @@ public:
         bool configComplete = !top.isNull();
 
         configComplete &= getJsonValue(top[FPSTR(_nameConfigEnabled)], blinkingEnabled, true);
-        configComplete &= getJsonValue(top[FPSTR(_nameConfigPeriod)], blinkingPeriod, 42);
+        configComplete &= getJsonValue(top[FPSTR(_nameConfigPeriod)], blinkingPeriod, 60);
         if (DONTBLINK_DEBUG_OUTPUT)
         {
             Serial.print("DontBlink enabled: " + String(blinkingEnabled ? "true" : "false") + ", Period: " + String(blinkingPeriod) + " min\n");
@@ -59,7 +59,7 @@ public:
         }
         return configComplete;
     }
-/* Seems we don't need this at all (Analog_Clock_h didn't have those), unsure what they do and why I had it in the first place
+/* Seems we don't need this at all (Analog_Clock_h didn't have those), unsure what they do and why I had it in the first place --- oh, apparently it's for MQTT/HTTP JSON API
 
     void addToJsonState(JsonObject &root) override
     {

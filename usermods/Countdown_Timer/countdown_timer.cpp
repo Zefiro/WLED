@@ -250,3 +250,6 @@ void readFromJsonState(JsonObject &root) override
     return USERMOD_ID_UNSPECIFIED; // or 0; WLED defines USERMOD_ID_UNSPECIFIED.
   }
 };
+
+static CountdownTimerUsermod countdownTimer;
+REGISTER_USERMOD(countdownTimer);

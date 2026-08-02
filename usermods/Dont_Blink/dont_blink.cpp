@@ -91,9 +91,9 @@ public:
     void appendConfigData() override
     {
 /* This seems to be unecessary and not do anything anyway
-        oappend(SET_F("addField('dont_blink','TEST_C',"));
-        oappend(blinkingEnabled ? SET_F("true") : SET_F("false"));
-        oappend(SET_F(");"));
+        oappend(F("addField('dont_blink','TEST_C',"));
+        oappend(blinkingEnabled ? F("true") : F("false"));
+        oappend(F(");"));
 //*/
     }
 
@@ -181,3 +181,6 @@ uint16_t DontBlink::lastTriggeredMinOfDay = 0;
 const char DontBlink::_name[] PROGMEM = "Don't Blink";
 const char DontBlink::_nameConfigEnabled[] PROGMEM = "Blinking enabled";
 const char DontBlink::_nameConfigPeriod[] PROGMEM = "Blinking Period (min)";
+
+static DontBlink dontBlink;
+REGISTER_USERMOD(dontBlink);

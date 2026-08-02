@@ -241,7 +241,7 @@ private:
     intensity: 111
 */
 
-  static uint16_t fxDancer() {
+  static void fxDancer() {
     // configuration parameters.
     uint8_t speed = SEGMENT.speed;
     uint16_t px_dimm = 256 - SEGMENT.custom1; // dimm strength, 0=no dimming, 255=full dimming (inverted because we multiply and divide by 256)
@@ -423,15 +423,13 @@ private:
         blend_index_current_fp = (blend_index_current_fp + px_offset_fp) % (blendTable.totalLen << 16);
         curPxDimm = (curPxDimm * px_dimm) >> 8;
     }
-
-    return FRAMETIME;
   }
 
   static uint8_t lastX;
 
   /** This effect helps to find the "circle offset". Change the offset (speed) slider until the red dot (color1) is at the top.
    *  Green (color2) marks the currently configured (saved) position, blue (color3) is the physical first pixel (origin) of this ball. */
-  static uint16_t fxDancerCircleOffsetHelper() {
+  static void fxDancerCircleOffsetHelper() {
     uint8_t offset = (SEGMENT.speed/ 10) % DANCER_BALL_LENGTH;
     if (DANCER_DEBUG_OUTPUT && SEGMENT.speed != lastX) {
       Serial.println("Offset: " + String(offset) + " (" + String(SEGMENT.speed) + ")");
@@ -452,7 +450,6 @@ private:
       }
       SEGMENT.setPixelColor(pxIdx, c);
     }
-    return FRAMETIME;
   }
 
 
@@ -514,3 +511,5 @@ private:
 };
 uint8_t DragonDancerFx::lastX = 0;
 
+static DragonDancerFx dragonDancerFx;
+REGISTER_USERMOD(dragonDancerFx);

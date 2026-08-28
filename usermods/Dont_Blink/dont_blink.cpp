@@ -5,7 +5,6 @@
 #define DONTBLINK_DEBUG_OUTPUT true
 #include "wled.h"
 #include "time.h"
-#include "ESP8266WiFi.h"
 
 #define DONT_BLINK_FADE_DURATION_MS 1500
 #define DONT_BLINK_OFF_DURATION_MS 2000

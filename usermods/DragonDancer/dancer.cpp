@@ -11,7 +11,7 @@
 #include "../wled00/FX.h"
 
 #define DANCER_DEBUG_OUTPUT false // uses Serial.println for debugging
-#define FX_MODE_DANCER 200
+#define FX_MODE_AUTO 255 // use next available
 /*
 Name@ sliders ; colors ; palette ; flags ; commands
 
@@ -170,8 +170,8 @@ public:
 void setup() {
     if (DANCER_DEBUG_OUTPUT) Serial.println("DragonDancer mod setup()!");
     initBlendTable();
-    strip.addEffect(FX_MODE_DANCER, fxDancer, _data_FX_MODE_DANCER);
-    strip.addEffect(FX_MODE_DANCER+1, fxDancerCircleOffsetHelper, _data_FX_MODE_DANCER_HELPER);
+    strip.addEffect(FX_MODE_AUTO, fxDancer, _data_FX_MODE_DANCER);
+    strip.addEffect(FX_MODE_AUTO, fxDancerCircleOffsetHelper, _data_FX_MODE_DANCER_HELPER);
   }
 
   /** Calculates lensum and totalLen */
